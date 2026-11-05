@@ -79,6 +79,7 @@
 <div class="panel review"><div><h2>研究员复核 / HUMAN SIGN-OFF</h2><p>只有确定性审计门禁通过后才允许批准策略版本。阻断决定和原因同样写入本次运行记录，形成可追溯的研究闭环。</p></div><div class="review-controls"><input id="reviewReason" placeholder="填写复核意见或阻断原因（至少 3 字）"><button class="approve" id="approveBtn" disabled>批准版本</button><button class="reject" id="rejectBtn" disabled>阻断晋级</button></div><div class="review-result" id="reviewResult"></div></div>
 <div class="panel section"><h2>日净值对账 <small>FRAMEBT 为外部参考口径</small></h2><div class="table-wrap" style="max-height:240px"><table class="table"><thead><tr><th>DATE</th><th>EVENT EQUITY</th><th>REPLAY EQUITY</th><th>FRAMEBT</th><th>GAP</th></tr></thead><tbody id="days"><tr><td colspan="5" style="color:#89949e">尚无数据</td></tr></tbody></table></div></div>
 </section></div><div class="footer">QUANT AUDIT LAB · 数据有来源，假设有标记，结论可复核</div></main>
+<canvas id="spiderCanvas" class="spider-overlay" aria-hidden="true"></canvas>
 <script>
 const $=id=>document.getElementById(id);
 const today=new Date(),iso=d=>{const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);return local.toISOString().slice(0,10)},todayValue=iso(today);$('end').max=todayValue;$('start').max=todayValue;$('end').value=todayValue;
@@ -193,5 +194,5 @@ async function runPipeline(endpoint,extra,btn){
 }
 $('run').onclick=()=>runPipeline('/api/audit',{},$('run'));
 $('replayFactor').onclick=async()=>{try{const file=$('factorFile').files[0];if(!file)throw Error('请先选择 RD-Agent 因子分数 JSON。');const candidate=JSON.parse(await file.text());if(!Array.isArray(candidate.scores))throw Error('JSON 必须包含 scores 数组。');if(candidate.scores.length>10000)throw Error('最多导入 10,000 条日分数。');const factorName=$('factorName').value.trim()||candidate.factor_name;if(!factorName)throw Error('请填写因子名称。');const experimentId=$('experimentId').value.trim()||candidate.experiment_id||file.name;await runPipeline('/api/factor-replay',{factor_name:factorName,experiment_id:experimentId,threshold:+$('factorThreshold').value,scores:candidate.scores},$('replayFactor'))}catch(e){$('reviewResult').style.display='block';$('reviewResult').textContent=e.message}};
-</script><canvas id="spiderCanvas" class="spider-overlay" aria-hidden="true"></canvas></body></html>
+</script></body></html>
 
