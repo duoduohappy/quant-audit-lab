@@ -25,6 +25,7 @@ FAILURE_COOLDOWN_SECONDS = max(10, int(os.getenv("MARKET_FAILURE_COOLDOWN_SECOND
 _provider_lock = threading.Lock()
 _last_provider_call = 0.0
 _retry_after = 0.0
+_last_quote_call = 0.0
 
 
 def _date_key(value: str) -> str:
@@ -91,6 +92,17 @@ def _symbol_with_exchange(symbol: str) -> str:
     if symbol.startswith(("4", "8")):
         return f"bj{symbol}"
     return f"sz{symbol}"
+
+
+def fetch_quote(symbol: str) -> pd.DataFrame:
+    """Fetch one live quote and five-level book; serialize and throttle provider calls."""
+    global _last_quote_call, _last_provider_call
+    with _provider_lock:
+        delay = MIN_PROVIDER_INTERVAL_SECONDS - (time.time() - max(_last_quote_call, _last_provider_call))
+        if delay > 0:
+            time.sleep(delay)
+        _last_quote_call = _last_provider_call = time.time()
+        return ak.stock_bid_ask_em(symbol=symbol)
 
 
 def _fetch_provider(provider: str, symbol: str, start: str, end: str) -> pd.DataFrame:
