@@ -34,6 +34,26 @@ _QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "20")))
 _QUOTE_FAILURE_UNTIL = 0.0
 _QUOTE_STATS = {"requests": 0, "provider_successes": 0, "provider_failures": 0,
                 "cache_hits": 0, "last_success_at": None, "last_error": None}
+_RUN_PROGRESS_LOCK = threading.Lock()
+_RUN_PROGRESS: dict[str, dict] = {}
+
+
+def _publish_run_progress(progress_id: str | None, stage: str, state: str,
+                          message: str, details: dict | None = None):
+    if not progress_id:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _RUN_PROGRESS_LOCK:
+        expired = [key for key, value in _RUN_PROGRESS.items()
+                   if (datetime.now(timezone.utc) - datetime.fromisoformat(value["updated_at"])).total_seconds() > 3600]
+        for key in expired:
+            _RUN_PROGRESS.pop(key, None)
+        record = _RUN_PROGRESS.setdefault(progress_id, {"events": [], "status": "running"})
+        event = {"seq": len(record["events"]) + 1, "stage": stage, "state": state,
+                 "message": message, "updated_at": now, "details": details or {}}
+        record["events"].append(event)
+        record["status"] = "failed" if state == "failed" else "complete" if stage == "complete" else "running"
+        record["updated_at"] = now
 
 
 @app.middleware("http")
@@ -126,6 +146,7 @@ class AuditRequest(BaseModel):
     slippage_bps: float = Field(5, ge=0, le=100)
     commission_bps: float = Field(2.5, ge=0, le=100)
     use_llm: bool = False
+    progress_id: str | None = Field(None, min_length=8, max_length=80)
 
     @model_validator(mode="after")
     def validate_date_range(self):
@@ -226,6 +247,18 @@ def telemetry():
     }
 
 
+@app.get("/api/runs/progress/{progress_id}")
+def run_progress(progress_id: str, after: int = 0):
+    """Return actual backend stage events for a running audit request."""
+    with _RUN_PROGRESS_LOCK:
+        record = _RUN_PROGRESS.get(progress_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="没有找到该运行进度；任务可能已过期或服务已重启。")
+        return {"progress_id": progress_id, "status": record["status"],
+                "events": [event for event in record["events"] if event["seq"] > after],
+                "updated_at": record["updated_at"]}
+
+
 @app.get("/api/market/quote/{symbol}")
 def market_quote(symbol: str):
     """Return a timestamped Tencent quote and five-level order book through a throttled cache."""
@@ -303,11 +336,22 @@ def market_quote(symbol: str):
 
 @app.post("/api/audit")
 def audit(request: AuditRequest):
+    progress_id = request.progress_id
+    _publish_run_progress(progress_id, "snapshot", "started", "向行情源请求所选标的日线快照")
+    current_stage = {"value": "snapshot"}
+    def publish(event):
+        current_stage["value"] = event["stage"]
+        _publish_run_progress(progress_id, event["stage"], event["state"], event["message"], event.get("details"))
     try:
-        return run_audit(request.model_dump(mode="json"))
+        result = run_audit(request.model_dump(mode="json"), progress_callback=publish)
+        _publish_run_progress(progress_id, "complete", "completed", "审计产物已写入，可进行人工复核",
+                              {"run_id": result["run_id"], "gate": result["summary"]["gate"]})
+        return result
     except ValueError as exc:
+        _publish_run_progress(progress_id, current_stage["value"], "failed", str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
+        _publish_run_progress(progress_id, current_stage["value"], "failed", f"{type(exc).__name__}: {exc}")
         raise HTTPException(status_code=502, detail=f"行情获取或审计失败：{type(exc).__name__}: {exc}") from exc
 
 
@@ -332,12 +376,23 @@ def factor_replay(request: FactorReplayRequest):
                  "factor_name": request.factor_name, "threshold": request.threshold,
                  "score_count": len(rows), "signal_sha256": digest,
                  "signal_snapshot_file": str(signal_file.relative_to(ROOT.parent))}
+    progress_id = request.progress_id
+    current_stage = {"value": "snapshot"}
+    def publish(event):
+        current_stage["value"] = event["stage"]
+        _publish_run_progress(progress_id, event["stage"], event["state"], event["message"], event.get("details"))
     try:
-        return run_audit(request.model_dump(mode="json"), signal_scores=score_map,
-                         research_candidate=candidate)
+        _publish_run_progress(progress_id, "snapshot", "started", "校验行情区间与外部因子分数")
+        result = run_audit(request.model_dump(mode="json"), signal_scores=score_map,
+                           research_candidate=candidate, progress_callback=publish)
+        _publish_run_progress(progress_id, "complete", "completed", "因子回放与审计产物已写入",
+                              {"run_id": result["run_id"], "gate": result["summary"]["gate"]})
+        return result
     except ValueError as exc:
+        _publish_run_progress(progress_id, current_stage["value"], "failed", str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
+        _publish_run_progress(progress_id, current_stage["value"], "failed", f"{type(exc).__name__}: {exc}")
         raise HTTPException(status_code=502, detail=f"因子信号回测失败：{type(exc).__name__}: {exc}") from exc
 
 
