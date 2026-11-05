@@ -28,17 +28,25 @@ def _metrics(curve: pd.DataFrame) -> dict:
 
 
 def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
-              research_candidate: dict | None = None) -> dict:
+              research_candidate: dict | None = None, progress_callback=None) -> dict:
+    def progress(stage: str, state: str, message: str, **details):
+        if progress_callback:
+            progress_callback({"stage": stage, "state": state, "message": message, "details": details})
+
     symbol = payload["symbol"].strip()
     fast, slow = int(payload["fast_window"]), int(payload["slow_window"])
     if not symbol.isdigit() or len(symbol) != 6:
         raise ValueError("股票代码请输入 6 位数字，例如 600519。")
     if fast < 2 or slow <= fast or slow > 200:
         raise ValueError("均线参数必须满足 2 ≤ 快线 < 慢线 ≤ 200。")
+    progress("snapshot", "started", "向行情源请求标的日线并校验快照")
     df, provenance = fetch_daily(symbol, payload["start_date"], payload["end_date"])
+    progress("snapshot", "completed", "日线快照已载入", rows=len(df), provider=provenance.get("provider"),
+             snapshot_sha256=provenance.get("snapshot_sha256"))
     if len(df) < slow + 2:
         raise ValueError(f"当前日期区间仅有 {len(df)} 个交易日，至少需要 {slow + 2} 条日线完成慢均线预热与执行。")
     if signal_scores is None:
+        progress("signal", "started", "根据收盘价与移动均线计算策略状态", fast_window=fast, slow_window=slow)
         signals = make_signals(df, fast, slow)
     else:
         threshold = float(research_candidate["threshold"])
@@ -62,12 +70,23 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
                               "overlap_dates": len(set(signal_scores) - set(missing)),
                               "unmatched_dates": len(missing),
                               "execution": "score observed at close; target state executes from next session"}
+        progress("signal", "started", "导入的 point-in-time 因子分数已对齐行情交易日",
+                 factor_name=research_candidate.get("factor_name"), score_count=len(signal_scores))
+    progress("signal", "completed", "策略目标状态序列已生成", signal_days=len(signals))
     cash, slip, commission = float(payload["initial_cash"]), float(payload["slippage_bps"]), float(payload["commission_bps"])
+    progress("event_ledger", "started", "执行逐日事件账本")
     event_curve, event_fills = event_engine(df, signals, symbol, cash, slip, commission)
+    progress("event_ledger", "completed", "事件账本执行完成", fills=len(event_fills))
+    progress("vector_ledger", "started", "执行独立向量账本")
     vector_curve, vector_fills = vector_engine(df, signals, symbol, cash, slip, commission)
+    progress("vector_ledger", "completed", "向量账本执行完成", fills=len(vector_fills))
+    progress("framebt", "started", "向 framebt 适配器提交同一行情快照")
     framebt_curve, framebt_fills, framebt_meta = run_framebt(
         df, symbol, fast, slow, cash, slip, commission,
         target_states=signals.astype(int).tolist() if signal_scores is not None else None)
+    progress("framebt", "completed", "framebt 回测完成", fills=len(framebt_fills),
+             version=framebt_meta.get("version"), source_commit=framebt_meta.get("source_commit"))
+    progress("reconciliation", "started", "对齐逐日净值与成交记录")
     daily = event_curve.merge(vector_curve, on="date", suffixes=("_event", "_vector"))
     daily = daily.merge(framebt_curve.rename(columns={"equity": "equity_framebt"}), on="date", how="left")
     daily["gap"] = daily.equity_event - daily.equity_vector
@@ -79,6 +98,8 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
     max_gap = float(daily.abs_gap.max()) if len(daily) else 0.0
     divergent = int((daily.abs_gap > .01).sum())
     gate = "PASS" if max_gap <= .01 and fill_diff == 0 else "BLOCK"
+    progress("reconciliation", "completed", "一致性门禁已计算", gate=gate, max_nav_gap=max_gap,
+             fill_mismatches=fill_diff, divergent_days=divergent)
     summary = {"max_abs_nav_gap": max_gap, "divergent_days": divergent, "fill_mismatch_count": fill_diff,
                "gate": gate, "event_metrics": _metrics(event_curve), "vector_metrics": _metrics(vector_curve),
                "framebt_metrics": _metrics(framebt_curve),
@@ -103,6 +124,8 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
               "limitations":["使用未复权日线；分红送转、ST 特殊涨跌幅、停牌撮合与交易所规则细节未完整建模。",
                              "framebt 已实际运行，但它与项目内账本的成交手数、成本和涨跌停假设可能不同；净值只作交叉观察，不将其差异误判为账本故障。",
                              "两套项目内账本的一致性门禁不代表策略有效；历史回测不代表未来收益。"]}
+    progress("evidence_agent", "started", "根据审计证据生成规则解释" +
+             ("与 LLM 摘要" if payload.get("use_llm", False) else "；未启用 LLM"))
     output["agent"] = explain(output, enabled=bool(payload.get("use_llm", False)))
     if research_candidate:
         output["research_candidate"] = research_candidate
@@ -111,4 +134,6 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
     output["artifact_file"] = f"data/runs/{output['run_id']}.json"
     artifact = run_dir / f"{output['run_id']}.json"
     artifact.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    progress("evidence_agent", "completed", "证据解释与运行产物已保存", agent_mode=output["agent"].get("mode"))
     return output
+
