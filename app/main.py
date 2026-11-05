@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from dotenv import load_dotenv
 
 from app.audit import run_audit
@@ -28,6 +28,10 @@ _PROCESS_STARTED = time.monotonic()
 _OPS_LOCK = threading.Lock()
 _OPS = {"requests": 0, "active": 0, "last_request_at": None,
         "last_latency_ms": None, "last_status": None}
+_QUOTE_LOCK = threading.Lock()
+_QUOTE_CACHE: dict[str, dict] = {}
+_QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "20")))
+_QUOTE_FAILURE_UNTIL = 0.0
 
 
 @app.middleware("http")
@@ -113,6 +117,14 @@ class AuditRequest(BaseModel):
     commission_bps: float = Field(2.5, ge=0, le=100)
     use_llm: bool = False
 
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if self.start_date >= self.end_date:
+            raise ValueError("开始日期必须早于结束日期。")
+        if self.end_date > date.today():
+            raise ValueError("结束日期不能晚于今天。")
+        return self
+
 
 class ReviewDecision(BaseModel):
     decision: Literal["approve", "block"]
@@ -186,6 +198,57 @@ def telemetry():
         "latest_run": latest_run,
         "llm_configured": bool(os.getenv("LLM_API_KEY")),
     }
+
+
+@app.get("/api/market/quote/{symbol}")
+def market_quote(symbol: str):
+    """Return a cached, per-symbol Eastmoney quote snapshot through AkShare."""
+    global _QUOTE_FAILURE_UNTIL
+    if len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036":
+        raise HTTPException(status_code=422, detail="仅支持沪深市场 0/3/6 开头的 6 位股票代码。")
+    now = time.time()
+    with _QUOTE_LOCK:
+        cached = _QUOTE_CACHE.get(symbol)
+        if cached and now - cached["_cached_epoch"] < _QUOTE_TTL_SECONDS:
+            return {**cached["payload"], "cache_hit": True,
+                    "cache_age_seconds": int(now - cached["_cached_epoch"]),
+                    "refresh_after_seconds": max(0, int(_QUOTE_TTL_SECONDS - (now - cached["_cached_epoch"]))) }
+        if now < _QUOTE_FAILURE_UNTIL:
+            if cached:
+                return {**cached["payload"], "cache_hit": True, "stale": True,
+                        "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
+                        "refresh_after_seconds": int(_QUOTE_FAILURE_UNTIL - now),
+                        "warning": "行情源处于故障冷却期，返回最近成功快照。"}
+            raise HTTPException(status_code=503, detail=f"行情源故障冷却中，请 {int(_QUOTE_FAILURE_UNTIL-now)} 秒后重试。")
+        try:
+            frame = market_provider.fetch_quote(symbol)
+            values = dict(zip(frame["item"], frame["value"]))
+            number = lambda key: float(values[key]) if values.get(key) is not None else None
+            price = number("最新")
+            if price is None or not math.isfinite(price) or price <= 0:
+                raise ValueError("行情源没有返回有效现价。")
+            payload = {
+                "symbol": symbol, "price": price, "change": number("涨跌"),
+                "change_pct": number("涨幅"), "volume_lots": number("总手"),
+                "amount": number("金额"), "average_price": number("均价"),
+                "open": number("今开"), "high": number("最高"), "low": number("最低"),
+                "previous_close": number("昨收"),
+                "bids": [{"price": number(f"buy_{i}"), "volume": number(f"buy_{i}_vol")} for i in range(1, 6)],
+                "asks": [{"price": number(f"sell_{i}"), "volume": number(f"sell_{i}_vol")} for i in range(1, 6)],
+                "provider": "Eastmoney via AkShare stock_bid_ask_em",
+                "observed_at": datetime.now(timezone.utc).isoformat(), "stale": False,
+            }
+            _QUOTE_CACHE[symbol] = {"payload": payload, "_cached_epoch": now}
+            _QUOTE_FAILURE_UNTIL = 0.0
+            return {**payload, "cache_hit": False, "cache_age_seconds": 0,
+                    "refresh_after_seconds": _QUOTE_TTL_SECONDS}
+        except Exception as exc:
+            _QUOTE_FAILURE_UNTIL = time.time() + 30
+            if cached:
+                return {**cached["payload"], "cache_hit": True, "stale": True,
+                        "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
+                        "refresh_after_seconds": 0, "warning": f"行情源暂不可用：{type(exc).__name__}"}
+            raise HTTPException(status_code=502, detail=f"实时行情暂不可用：{type(exc).__name__}: {exc}") from exc
 
 
 @app.post("/api/audit")
