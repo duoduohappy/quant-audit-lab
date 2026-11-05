@@ -223,7 +223,12 @@ def market_quote(symbol: str):
         try:
             frame = market_provider.fetch_quote(symbol)
             values = dict(zip(frame["item"], frame["value"]))
-            number = lambda key: float(values[key]) if values.get(key) is not None else None
+            def number(key):
+                try:
+                    value = float(values[key])
+                    return value if math.isfinite(value) else None
+                except (KeyError, TypeError, ValueError):
+                    return None
             price = number("最新")
             if price is None or not math.isfinite(price) or price <= 0:
                 raise ValueError("行情源没有返回有效现价。")
