@@ -32,6 +32,8 @@ _QUOTE_LOCK = threading.Lock()
 _QUOTE_CACHE: dict[str, dict] = {}
 _QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "20")))
 _QUOTE_FAILURE_UNTIL = 0.0
+_QUOTE_STATS = {"requests": 0, "provider_successes": 0, "provider_failures": 0,
+                "cache_hits": 0, "last_success_at": None, "last_error": None}
 
 
 @app.middleware("http")
@@ -100,6 +102,14 @@ def _latest_run():
                 "fill_mismatches": run.get("summary", {}).get("fill_mismatch_count"),
                 "snapshot_sha256": run.get("provenance", {}).get("snapshot_sha256"),
                 "agent_mode": run.get("agent", {}).get("mode"),
+                "strategy_source": run.get("config", {}).get("strategy_source"),
+                "fast_window": run.get("config", {}).get("fast_window"),
+                "slow_window": run.get("config", {}).get("slow_window"),
+                "framebt_version": run.get("config", {}).get("framebt", {}).get("version"),
+                "framebt_commit": run.get("config", {}).get("framebt", {}).get("source_commit"),
+                "event_fills": run.get("summary", {}).get("event_fill_count", 0),
+                "vector_fills": run.get("summary", {}).get("vector_fill_count", 0),
+                "framebt_fills": run.get("summary", {}).get("framebt_fill_count", 0),
                 "human_review": run.get("human_review"),
                 "equity_tail": run.get("daily", [])[-48:]}
     except (OSError, ValueError, json.JSONDecodeError):
@@ -182,6 +192,16 @@ def telemetry():
         ops = dict(_OPS)
     last_provider_call = market_provider._last_provider_call
     retry_after = market_provider._retry_after
+    with _QUOTE_LOCK:
+        quote_stats = dict(_QUOTE_STATS)
+        quote_cache = {symbol: {"price": entry["payload"].get("price"),
+                                "source_timestamp": entry["payload"].get("source_timestamp"),
+                                "provider": entry["payload"].get("provider"),
+                                "stale": entry["payload"].get("stale"),
+                                "source_age_seconds": entry["payload"].get("source_age_seconds"),
+                                "last_error": quote_stats.get("last_error"),
+                                "age_seconds": max(0, int(time.time() - entry["_cached_epoch"]))}
+                       for symbol, entry in _QUOTE_CACHE.items()}
     return {
         "sampled_at": datetime.now(timezone.utc).isoformat(),
         "service": {"status": "online", "uptime_seconds": int(time.monotonic() - _PROCESS_STARTED),
@@ -195,6 +215,12 @@ def telemetry():
                    "retry_cooldown_seconds": max(0, int(retry_after - now)),
                    "seconds_since_provider_call": int(now - last_provider_call) if last_provider_call else None,
                    "snapshot": market, "tape": tape},
+        "live_quote": {"provider": "Tencent Finance quote feed",
+                       "status": "cooldown" if _QUOTE_FAILURE_UNTIL > now else
+                                  "available" if quote_cache else "not_requested",
+                       "cache_ttl_seconds": _QUOTE_TTL_SECONDS,
+                       "cooldown_seconds": max(0, int(_QUOTE_FAILURE_UNTIL - now)),
+                       "stats": quote_stats, "symbols": quote_cache},
         "latest_run": latest_run,
         "llm_configured": bool(os.getenv("LLM_API_KEY")),
     }
@@ -202,14 +228,16 @@ def telemetry():
 
 @app.get("/api/market/quote/{symbol}")
 def market_quote(symbol: str):
-    """Return a cached, per-symbol Eastmoney quote snapshot through AkShare."""
+    """Return a timestamped Tencent quote and five-level order book through a throttled cache."""
     global _QUOTE_FAILURE_UNTIL
     if len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036":
         raise HTTPException(status_code=422, detail="仅支持沪深市场 0/3/6 开头的 6 位股票代码。")
     now = time.time()
     with _QUOTE_LOCK:
         cached = _QUOTE_CACHE.get(symbol)
+        _QUOTE_STATS["requests"] += 1
         if cached and now - cached["_cached_epoch"] < _QUOTE_TTL_SECONDS:
+            _QUOTE_STATS["cache_hits"] += 1
             return {**cached["payload"], "cache_hit": True,
                     "cache_age_seconds": int(now - cached["_cached_epoch"]),
                     "refresh_after_seconds": max(0, int(_QUOTE_TTL_SECONDS - (now - cached["_cached_epoch"]))) }
@@ -232,6 +260,16 @@ def market_quote(symbol: str):
             price = number("最新")
             if price is None or not math.isfinite(price) or price <= 0:
                 raise ValueError("行情源没有返回有效现价。")
+            raw_timestamp = values.get("行情时间")
+            source_time = None
+            if raw_timestamp:
+                try:
+                    source_time = datetime.strptime(str(raw_timestamp), "%Y%m%d%H%M%S").replace(
+                        tzinfo=timezone(timedelta(hours=8)))
+                except ValueError:
+                    source_time = None
+            age_seconds = max(0, int((datetime.now(timezone.utc) - source_time.astimezone(timezone.utc)).total_seconds())) if source_time else None
+            is_stale = age_seconds is None or age_seconds > 600
             payload = {
                 "symbol": symbol, "price": price, "change": number("涨跌"),
                 "change_pct": number("涨幅"), "volume_lots": number("总手"),
@@ -240,20 +278,27 @@ def market_quote(symbol: str):
                 "previous_close": number("昨收"),
                 "bids": [{"price": number(f"buy_{i}"), "volume": number(f"buy_{i}_vol")} for i in range(1, 6)],
                 "asks": [{"price": number(f"sell_{i}"), "volume": number(f"sell_{i}_vol")} for i in range(1, 6)],
-                "provider": "Eastmoney via AkShare stock_bid_ask_em",
-                "observed_at": datetime.now(timezone.utc).isoformat(), "stale": False,
+                "provider": "Tencent Finance quote feed",
+                "source_timestamp": source_time.isoformat() if source_time else None,
+                "observed_at": datetime.now(timezone.utc).isoformat(), "source_age_seconds": age_seconds,
+                "stale": is_stale, "freshness": "LIVE" if not is_stale else "STALE_OR_UNVERIFIED",
             }
             _QUOTE_CACHE[symbol] = {"payload": payload, "_cached_epoch": now}
             _QUOTE_FAILURE_UNTIL = 0.0
+            _QUOTE_STATS["provider_successes"] += 1
+            _QUOTE_STATS["last_success_at"] = payload["observed_at"]
+            _QUOTE_STATS["last_error"] = None
             return {**payload, "cache_hit": False, "cache_age_seconds": 0,
                     "refresh_after_seconds": _QUOTE_TTL_SECONDS}
         except Exception as exc:
             _QUOTE_FAILURE_UNTIL = time.time() + 30
+            _QUOTE_STATS["provider_failures"] += 1
+            _QUOTE_STATS["last_error"] = f"{type(exc).__name__}: {str(exc)[:220]}"
             if cached:
                 return {**cached["payload"], "cache_hit": True, "stale": True,
                         "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
                         "refresh_after_seconds": 0, "warning": f"行情源暂不可用：{type(exc).__name__}"}
-            raise HTTPException(status_code=502, detail=f"实时行情暂不可用：{type(exc).__name__}: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"实时行情暂不可用：{type(exc).__name__}: {str(exc)[:220]}") from exc
 
 
 @app.post("/api/audit")
