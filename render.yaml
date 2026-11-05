@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: quant-audit-lab
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: LLM_API_KEY
+        sync: false

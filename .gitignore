@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+data/
+/upstream/
+*.sqlite3
+*.parquet
+*.csv
+!.env.example
