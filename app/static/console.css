@@ -38,3 +38,8 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.13;ba
 @media(max-width:1120px){.quote-desk{grid-template-columns:1fr 1fr}}
 @media(max-width:780px){.quote-desk{grid-template-columns:1fr}}
 
+/* Motion is reserved for user-triggered request state and data changes; no decorative live-looking activity. */
+.module-glyph,.crew-bot,.idle-orbit,.idle-orbit:before,.idle-orbit:after,.room-connections,.robot,.room-flow i:after,.live-poll i{animation:none!important}
+.room-connections,.robot,.idle-orbit{display:none!important}
+.crew-glyph{width:28px;height:28px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--crew) 45%,transparent);border-radius:7px;background:color-mix(in srgb,var(--crew) 12%,#101119);color:var(--crew);font:600 11px 'DM Mono'}
+
