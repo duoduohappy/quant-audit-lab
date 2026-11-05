@@ -9,15 +9,19 @@
 <section class="run-strip"><div class="strip-label"><span>RUN PIPELINE</span><b>五段研究闭环</b></div><div class="audit-flow"><div class="stage" id="stage-data"><i>01</i><div><b>行情快照</b><small class="state">等待数据</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-signal"><i>02</i><div><b>策略信号</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-ledgers"><i>03</i><div><b>多引擎回测</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-audit"><i>04</i><div><b>一致性审计</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-agent"><i>05</i><div><b>Agent证据解释</b><small class="state">等待运行</small></div></div></div><div class="run-id" id="runId">NO RUN</div></section>
 <section class="control-room panel" id="agentDeck" data-state="idle" aria-label="量化研究控制舱">
  <div class="room-topline"><div><span class="deck-kicker">GROKBOT-STYLE RESEARCH DESK / QUANT AUDIT LAB</span><h2>量化研究控制舱 <small>真实行情 · 可追溯回测 · 人工复核</small></h2></div><div class="deck-status"><i></i><span id="deckStatus" aria-live="polite">等待审计请求</span></div></div>
- <div class="module-grid" aria-label="系统模块">
-  <div class="module-tile cyan"><i class="module-glyph glyph-radar">◉</i><span><b>AKSHARE</b><small>行情接入</small></span><em>DATA</em></div>
-  <div class="module-tile pink"><i class="module-glyph glyph-cross">⌖</i><span><b>SCANNER</b><small>标的 / 区间</small></span><em>INPUT</em></div>
-  <div class="module-tile blue"><i class="module-glyph glyph-signal">⌁</i><span><b>SIGNAL</b><small>均线 / 因子</small></span><em>RULE</em></div>
-  <div class="module-tile violet"><i class="module-glyph glyph-engine">⟳</i><span><b>FRAMEBT</b><small>因果回放</small></span><em>ENGINE</em></div>
-  <div class="module-tile green"><i class="module-glyph glyph-ledger">▤</i><span><b>LEDGER × 2</b><small>独立账本</small></span><em>REPLAY</em></div>
-  <div class="module-tile amber"><i class="module-glyph glyph-risk">⬡</i><span><b>RISK GATE</b><small>一致性门禁</small></span><em>CHECK</em></div>
-  <div class="module-tile pink"><i class="module-glyph glyph-agent">✳</i><span><b>EVIDENCE AGENT</b><small>证据解释</small></span><em>OPT-IN</em></div>
-  <div class="module-tile cyan"><i class="module-glyph glyph-human">◎</i><span><b>HUMAN DESK</b><small>研究员签核</small></span><em>REVIEW</em></div>
+  <div class="module-grid" aria-label="系统模块">
+   <div class="module-tile cyan"><i class="module-glyph glyph-radar">◉</i><span><b>MARKET FEED</b><small>行情源 / 健康</small></span><em id="modMarket">WAIT</em></div>
+   <div class="module-tile cyan"><i class="module-glyph glyph-ledger">▤</i><span><b>SNAPSHOT CACHE</b><small>缓存 / SHA-256</small></span><em id="modCache">EMPTY</em></div>
+   <div class="module-tile amber"><i class="module-glyph glyph-cross">⌖</i><span><b>RATE GUARD</b><small>节流 / 冷却</small></span><em id="modThrottle">READY</em></div>
+   <div class="module-tile pink"><i class="module-glyph glyph-cross">⌖</i><span><b>UNIVERSE SCAN</b><small>标的 / 区间</small></span><em>INPUT</em></div>
+   <div class="module-tile blue"><i class="module-glyph glyph-signal">⌁</i><span><b>SIGNAL LAB</b><small>均线 / 外部因子</small></span><em>RULE</em></div>
+   <div class="module-tile violet"><i class="module-glyph glyph-engine">⟳</i><span><b>FRAMEBT</b><small>因果回放</small></span><em>ENGINE</em></div>
+   <div class="module-tile green"><i class="module-glyph glyph-ledger">▤</i><span><b>EVENT LEDGER</b><small>逐事件记账</small></span><em>REPLAY</em></div>
+   <div class="module-tile green"><i class="module-glyph glyph-ledger">▥</i><span><b>VECTOR LEDGER</b><small>批量独立账本</small></span><em>REPLAY</em></div>
+   <div class="module-tile amber"><i class="module-glyph glyph-risk">⬡</i><span><b>RECONCILIATION</b><small>NAV / 成交差异</small></span><em id="modReconcile">WAIT</em></div>
+   <div class="module-tile amber"><i class="module-glyph glyph-risk">⬡</i><span><b>RISK GATE</b><small>晋级门禁</small></span><em id="modGate">WAIT</em></div>
+   <div class="module-tile pink"><i class="module-glyph glyph-agent">✳</i><span><b>EVIDENCE AGENT</b><small>规则 / 可选 LLM</small></span><em id="modAgent">IDLE</em></div>
+   <div class="module-tile cyan"><i class="module-glyph glyph-human">◎</i><span><b>HUMAN DESK</b><small>研究员签核</small></span><em id="modReview">WAIT</em></div>
  </div>
  <div class="room-grid">
   <div class="room-screen">
@@ -41,6 +45,19 @@
  </div>
  <div class="room-bottom"><div class="room-flow"><span>01 SNAPSHOT</span><i></i><span>02 SIGNAL</span><i></i><span>03 REPLAY</span><i></i><span>04 AUDIT</span><i></i><span>05 REVIEW</span></div><div class="room-note">动画表示请求状态 · 模块不是独立自治 Agent · 不接交易下单</div></div>
 </section>
+ <section class="live-ops" aria-label="实时系统遥测">
+  <div class="live-ops-head"><div><span class="deck-kicker">LIVE OPERATIONS / POLL 5 SEC</span><h2>实时运行遥测 <small>服务心跳与真实日线快照；不生成模拟行情</small></h2></div><div class="live-poll"><i></i><span id="telemetryState">正在连接遥测</span><small id="telemetryAt">—</small></div></div>
+  <div class="ops-metrics">
+   <article class="ops-metric"><span>API HEARTBEAT</span><b id="opsApi">CONNECTING</b><small id="opsLatency">等待服务响应</small><div class="pulse-bars" id="heartbeatBars" aria-hidden="true"></div></article>
+   <article class="ops-metric"><span>PROCESS UPTIME</span><b id="opsUptime">—</b><small id="opsRequests">累计请求 — · 活跃 —</small></article>
+   <article class="ops-metric"><span>MARKET SNAPSHOT</span><b id="opsMarket">NO SNAPSHOT</b><small id="opsMarketSub">运行一次审计以载入真实日线缓存</small></article>
+   <article class="ops-metric"><span>PROVIDER THROTTLE</span><b id="opsThrottle">READY</b><small id="opsThrottleSub">请求节流监控</small></article>
+  </div>
+  <div class="ops-bottom">
+   <article class="ops-panel"><header><b>REAL DAILY TAPE</b><span id="tapeMeta">等待缓存数据</span></header><div class="tape-chart-wrap"><svg id="tapeChart" viewBox="0 0 900 150" preserveAspectRatio="none" aria-label="最近日线收盘价"></svg><div id="tapeEmpty">审计完成后，将显示该股票缓存中的真实收盘价与成交量。</div></div><div class="tape-foot"><span id="tapeRange">—</span><span id="tapeClose">最近收盘 —</span></div></article>
+   <article class="ops-panel"><header><b>LAST AUDIT / SIGN-OFF</b><span id="opsRunStatus">NO RUN</span></header><div class="audit-live-row"><span>最近运行</span><b id="opsRunTime">—</b></div><div class="audit-live-row"><span>代码 / 数据源</span><b id="opsRunSource">—</b></div><div class="audit-live-row"><span>晋级门禁</span><b id="opsRunGate">—</b></div><div class="audit-live-row"><span>净值差 / 成交差异</span><b id="opsRunGap">—</b></div><div class="audit-live-row"><span>人工复核</span><b id="opsReview">待审</b></div><div class="audit-live-row hash-row"><span>快照 SHA-256</span><code id="opsHash">—</code></div></article>
+  </div>
+ </section>
 <div class="layout"><aside class="panel controls"><h2 class="panel-title">审计运行配置 <span style="color:var(--teal);font:10px 'DM Mono'">LIVE DATA</span></h2>
 <div class="field"><label>沪深 A 股代码 <span>6 位数字</span></label><input id="symbol" value="600519" maxlength="6"></div>
 <div class="grid2"><div class="field"><label>开始日期</label><input id="start" type="date"></div><div class="field"><label>结束日期</label><input id="end" type="date"></div></div>
@@ -69,6 +86,25 @@ function escapeHtml(value){return String(value).replace(/[&<>"']/g,ch=>({'&':'&a
 function deckState(state){const deck=$('agentDeck');deck.dataset.state=state;$('deckStatus').textContent=({idle:'等待审计请求',running:'审计请求处理中',complete:'审计完成 · 结果已载入',failed:'请求失败 · 请检查错误信息'})[state]||state;for(const id of ['crewData','crewSignal','crewReplay','crewAudit','crewAgent'])$(id).textContent=state==='running'?'BUSY':state==='complete'?'LOADED':'READY'}
 function updateRoomInputs(){ $('roomSymbol').textContent=$('symbol').value||'—';$('roomWindow').textContent=`${$('start').value||'START'} → ${$('end').value||'END'}` }
 ['symbol','start','end'].forEach(id=>$(id).addEventListener('input',updateRoomInputs));updateRoomInputs();
+const heartbeatHistory=[];
+function ageLabel(seconds){if(seconds==null)return'—';if(seconds<60)return`${seconds}s`;if(seconds<3600)return`${Math.floor(seconds/60)}m ${seconds%60}s`;if(seconds<86400)return`${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`;return`${Math.floor(seconds/86400)}d ${Math.floor(seconds%86400/3600)}h`}
+function renderHeartbeat(latency){heartbeatHistory.push(Math.max(3,Math.min(100,latency||3)));if(heartbeatHistory.length>24)heartbeatHistory.shift();$('heartbeatBars').innerHTML=heartbeatHistory.map((v,i)=>`<i style="height:${Math.max(4,Math.min(28,v*.18))}px;opacity:${.35+i/heartbeatHistory.length*.65}"></i>`).join('')}
+function renderTape(tape,market){const svg=$('tapeChart');if(!tape?.length){svg.style.display='none';$('tapeEmpty').style.display='grid';$('tapeMeta').textContent='等待缓存数据';return}
+ const values=tape.map(x=>x.close),min=Math.min(...values),max=Math.max(...values),span=max-min||1,W=900,H=150,left=18,right=15,top=12,bottom=22;
+ const x=i=>left+i*(W-left-right)/(tape.length-1||1),y=v=>H-bottom-(v-min)/span*(H-top-bottom),points=tape.map((d,i)=>`${x(i).toFixed(1)},${y(d.close).toFixed(1)}`).join(' '),base=`${x(tape.length-1)},${H-bottom} ${x(0)},${H-bottom}`;
+ const step=(W-left-right)/tape.length,bars=tape.map((d,i)=>{const maxVol=Math.max(...tape.map(x=>x.volume||0),1),height=(d.volume||0)/maxVol*19;return `<rect x="${left+i*step}" y="${H-height}" width="${Math.max(1,step*.62)}" height="${height}" fill="#a78bfa" opacity=".3"/>`}).join('');
+ svg.innerHTML=`<defs><linearGradient id="tapeArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#56e0bc" stop-opacity=".24"/><stop offset="1" stop-color="#56e0bc" stop-opacity="0"/></linearGradient></defs>${bars}<line x1="${left}" y1="${H-bottom}" x2="${W-right}" y2="${H-bottom}" stroke="#ffffff20"/><polygon points="${points} ${base}" fill="url(#tapeArea)"/><polyline points="${points}" fill="none" stroke="#56e0bc" stroke-width="2.8" vector-effect="non-scaling-stroke" filter="drop-shadow(0 0 5px #56e0bc77)"/><circle cx="${x(tape.length-1)}" cy="${y(values.at(-1))}" r="4" fill="#f052a8"><title>${tape.at(-1).date}: ${values.at(-1)}</title></circle>`;
+ svg.style.display='block';$('tapeEmpty').style.display='none';$('tapeRange').textContent=`${tape[0].date} → ${tape.at(-1).date} · ${tape.length} 个交易日`;$('tapeClose').textContent=`最新收盘 ${values.at(-1).toFixed(2)}`;$('tapeMeta').textContent=`${market?.symbol||''} · 成交量柱`;}
+function applyTelemetry(data){const service=data.service||{},market=data.market||{},snapshot=market.snapshot,run=data.latest_run;
+ $('telemetryState').textContent='LIVE · 每 5 秒轮询';$('telemetryAt').textContent=new Date(data.sampled_at).toLocaleTimeString();$('opsApi').textContent=`ONLINE · ${service.last_latency_ms??'—'} ms`;$('opsLatency').textContent=`HTTP ${service.last_status??200} · 最近请求延迟`;$('opsUptime').textContent=ageLabel(service.uptime_seconds);$('opsRequests').textContent=`累计请求 ${service.requests_total??0} · 活跃 ${service.active_requests??0}`;
+ const cooldown=market.retry_cooldown_seconds||0;$('opsThrottle').textContent=cooldown?`COOLDOWN ${cooldown}s`:'GUARDED';$('opsThrottleSub').textContent=`上游间隔 ≥ ${market.min_provider_interval_seconds??'—'}s · 故障冷却 ${market.failure_cooldown_seconds??'—'}s`;
+ $('opsMarket').textContent=snapshot?`${snapshot.symbol} · ${snapshot.bar_date}`:'NO SNAPSHOT';$('opsMarketSub').textContent=snapshot?`${snapshot.provider} · 缓存 ${ageLabel(snapshot.cache_age_seconds)} / TTL ${ageLabel(snapshot.cache_ttl_seconds)} · ${snapshot.rows} bars`:'运行一次审计以载入真实日线缓存';
+ $('modMarket').textContent=snapshot?'CACHED':'WAIT';$('modCache').textContent=snapshot?(snapshot.cache_age_seconds<=snapshot.cache_ttl_seconds?'FRESH':'STALE'):'EMPTY';$('modThrottle').textContent=cooldown?'COOLING':'GUARDED';
+ renderHeartbeat(service.last_latency_ms);renderTape(market.tape,snapshot);
+ if(run){$('opsRunStatus').textContent='RUN '+String(run.run_id).slice(0,8).toUpperCase();$('opsRunTime').textContent=new Date(run.created_at).toLocaleString();$('opsRunSource').textContent=`${run.symbol} · ${run.provider||'—'} · ${run.rows||0} bars`;$('opsRunGate').textContent=run.gate||'—';$('opsRunGate').dataset.gate=run.gate||'';$('opsRunGap').textContent=`¥${money(run.max_nav_gap||0)} · ${run.fill_mismatches||0} mismatches`;$('opsHash').textContent=run.snapshot_sha256||'—';$('opsReview').textContent=run.human_review?`${run.human_review.decision==='approve'?'已批准':'已阻断'} · ${run.human_review.reason}`:'等待研究员复核';$('modReconcile').textContent=`${run.fill_mismatches||0} DIFF`;$('modGate').textContent=run.gate||'WAIT';$('modAgent').textContent=run.agent_mode==='langgraph+llm'?'LLM':'RULES';$('modReview').textContent=run.human_review?'SIGNED':'PENDING'}else{$('opsRunStatus').textContent='NO RUN';$('modReconcile').textContent='WAIT';$('modGate').textContent='WAIT';$('modAgent').textContent='IDLE';$('modReview').textContent='WAIT'}
+}
+let telemetryBusy=false;async function pollTelemetry(){if(telemetryBusy)return;telemetryBusy=true;const started=performance.now();try{const response=await fetch('/api/telemetry',{cache:'no-store',signal:AbortSignal.timeout(4500)});if(!response.ok)throw Error(`HTTP ${response.status}`);const payload=await response.json();payload.service.last_latency_ms=Math.round(performance.now()-started);applyTelemetry(payload);$('apiStatus').textContent='● API ONLINE'}catch(error){$('telemetryState').textContent='遥测暂不可用';$('opsApi').textContent='OFFLINE';$('apiStatus').textContent='● API OFFLINE'}finally{telemetryBusy=false}}
+pollTelemetry();setInterval(pollTelemetry,5000);
 function stages(states){for(const [id,label] of Object.entries(states)){const el=$('stage-'+id);el.classList.remove('active','done');el.querySelector('.state').textContent=label;if(label==='处理中')el.classList.add('active');if(label==='完成')el.classList.add('done')}}
 function draw(data){
  const svg=$('chart'),W=900,H=290,p={l:64,r:18,t:16,b:28},vals=data.daily.flatMap(d=>[d.event,d.vector,d.framebt].filter(Number.isFinite));
