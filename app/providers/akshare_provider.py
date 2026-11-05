@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,14 +96,56 @@ def _symbol_with_exchange(symbol: str) -> str:
 
 
 def fetch_quote(symbol: str) -> pd.DataFrame:
-    """Fetch one live quote and five-level book; serialize and throttle provider calls."""
+    """Fetch one Tencent live quote and five-level book; retain the source timestamp."""
     global _last_quote_call, _last_provider_call
     with _provider_lock:
         delay = MIN_PROVIDER_INTERVAL_SECONDS - (time.time() - max(_last_quote_call, _last_provider_call))
         if delay > 0:
             time.sleep(delay)
         _last_quote_call = _last_provider_call = time.time()
-        return ak.stock_bid_ask_em(symbol=symbol)
+        prefix = "sh" if symbol.startswith("6") else "sz"
+        url = f"https://qt.gtimg.cn/q={prefix}{symbol}"
+        response = requests.get(url, timeout=(3, 8), headers={
+            "User-Agent": "Mozilla/5.0", "Referer": "https://finance.qq.com/"})
+        response.raise_for_status()
+        text = response.content.decode("gbk", errors="replace")
+        if '="' not in text:
+            raise ValueError("Tencent quote response did not contain a quote payload")
+        fields = text.split('="', 1)[1].rsplit('"', 1)[0].split("~")
+        if len(fields) < 36 or fields[2] != symbol:
+            raise ValueError("Tencent quote response is incomplete or for a different symbol")
+
+        def numeric(index):
+            try:
+                value = float(fields[index])
+                return value if pd.notna(value) else None
+            except (IndexError, TypeError, ValueError):
+                return None
+
+        previous = numeric(4)
+        price = numeric(3)
+        amount = None
+        try:
+            amount = float(fields[35].split("/")[2])
+        except (IndexError, TypeError, ValueError):
+            pass
+        values = {
+            "最新": price, "昨收": previous, "今开": numeric(5), "总手": numeric(6),
+            "金额": amount, "涨跌": numeric(31), "涨幅": numeric(32),
+            "最高": numeric(33), "最低": numeric(34),
+            "均价": amount / (numeric(6) * 100) if amount and numeric(6) else None,
+            "行情时间": fields[30] or None,
+        }
+        for level in range(5):
+            bid_price, bid_lots = 9 + level * 2, 10 + level * 2
+            ask_price, ask_lots = 19 + level * 2, 20 + level * 2
+            values[f"buy_{level + 1}"] = numeric(bid_price)
+            values[f"buy_{level + 1}_vol"] = numeric(bid_lots)
+            values[f"sell_{level + 1}"] = numeric(ask_price)
+            values[f"sell_{level + 1}_vol"] = numeric(ask_lots)
+        frame = pd.DataFrame.from_dict(values, orient="index", columns=["value"]).reset_index()
+        frame.columns = ["item", "value"]
+        return frame
 
 
 def _fetch_provider(provider: str, symbol: str, start: str, end: str) -> pd.DataFrame:
