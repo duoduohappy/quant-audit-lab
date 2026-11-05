@@ -106,13 +106,25 @@ def _latest_market_cache():
         return None, []
 
 
-def _latest_run():
+def _latest_run_path():
     run_dir = ROOT.parent / "data" / "runs"
     files = list(run_dir.glob("*.json")) if run_dir.exists() else []
     if not files:
         return None
+    def created_at(path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("created_at", "")
+        except (OSError, ValueError, json.JSONDecodeError):
+            return ""
+    return max(files, key=created_at)
+
+
+def _latest_run():
+    latest = _latest_run_path()
+    if latest is None:
+        return None
     try:
-        run = json.loads(max(files, key=lambda path: path.stat().st_mtime).read_text(encoding="utf-8"))
+        run = json.loads(latest.read_text(encoding="utf-8"))
         return {"run_id": run.get("run_id"), "created_at": run.get("created_at"),
                 "symbol": run.get("provenance", {}).get("symbol"),
                 "provider": run.get("provenance", {}).get("provider"),
@@ -134,6 +146,16 @@ def _latest_run():
                 "equity_tail": run.get("daily", [])[-48:]}
     except (OSError, ValueError, json.JSONDecodeError):
         return None
+
+
+def _read_run_artifact(run_id: UUID) -> dict:
+    artifact = ROOT.parent / "data" / "runs" / f"{run_id}.json"
+    if not artifact.is_file():
+        raise HTTPException(status_code=404, detail="找不到这次审计运行记录。")
+    try:
+        return json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="审计运行记录无法读取。") from exc
 
 
 class AuditRequest(BaseModel):
@@ -257,6 +279,24 @@ def run_progress(progress_id: str, after: int = 0):
         return {"progress_id": progress_id, "status": record["status"],
                 "events": [event for event in record["events"] if event["seq"] > after],
                 "updated_at": record["updated_at"]}
+
+
+@app.get("/api/runs/latest")
+def latest_run_artifact():
+    """Return the complete most recent saved audit so its review can resume after refresh."""
+    latest = _latest_run_path()
+    if latest is None:
+        raise HTTPException(status_code=404, detail="还没有已保存的审计运行。")
+    try:
+        return json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="最近一次审计运行记录无法读取。") from exc
+
+
+@app.get("/api/runs/{run_id}")
+def get_run_artifact(run_id: UUID):
+    """Fetch a saved run artifact by stable ID, including any recorded human decision."""
+    return _read_run_artifact(run_id)
 
 
 @app.get("/api/market/quote/{symbol}")
@@ -400,9 +440,7 @@ def factor_replay(request: FactorReplayRequest):
 def record_decision(run_id: UUID, decision: ReviewDecision):
     """Persist a human sign-off; approval is rejected unless deterministic checks passed."""
     artifact = ROOT.parent / "data" / "runs" / f"{run_id}.json"
-    if not artifact.is_file():
-        raise HTTPException(status_code=404, detail="找不到这次审计运行记录。")
-    record = json.loads(artifact.read_text(encoding="utf-8"))
+    record = _read_run_artifact(run_id)
     if decision.decision == "approve" and record.get("summary", {}).get("gate") != "PASS":
         raise HTTPException(status_code=409, detail="审计门禁未通过，不能批准策略版本。")
     record["human_review"] = {"decision": decision.decision, "reason": decision.reason.strip(),
