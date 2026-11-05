@@ -1,3 +1,4 @@
+requests>=2.31
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pandas>=2.2
@@ -7,3 +8,4 @@ python-dotenv>=1.0
 openai>=1.40
 langgraph>=0.3
 framebt @ git+https://github.com/LisonEvf/framebt.git@0c0cdfcd994ae45714491622a5df587e46a1ca0c
+
