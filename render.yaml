@@ -4,6 +4,8 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /api/health
+    autoDeployTrigger: commit
     envVars:
       - key: LLM_API_KEY
         sync: false
+
