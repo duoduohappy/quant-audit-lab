@@ -7,17 +7,39 @@
 <header class="top"><div class="brand"><div class="mark">QA</div><div><b>QUANT AUDIT LAB</b><small>A-SHARE BACKTEST TRUST WORKBENCH</small></div></div><div class="status" id="apiStatus">● API CONNECTING</div></header>
 <section class="hero"><div><div class="eyebrow">RESEARCH CONTROL / 01</div><h1>量化研究与回测审计工作台</h1><p>真实 A 股日线进入 framebt 因果引擎和独立账本，审计差异、解释证据、留存人工决策。</p></div><div class="hero-right">OPEN-SOURCE ENGINE · TRACEABLE RUNS<br>NO ORDER ROUTING · HUMAN SIGN-OFF</div></section>
 <section class="run-strip"><div class="strip-label"><span>RUN PIPELINE</span><b>五段研究闭环</b></div><div class="audit-flow"><div class="stage" id="stage-data"><i>01</i><div><b>行情快照</b><small class="state">等待数据</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-signal"><i>02</i><div><b>策略信号</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-ledgers"><i>03</i><div><b>多引擎回测</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-audit"><i>04</i><div><b>一致性审计</b><small class="state">等待运行</small></div></div><span class="flow-arrow">›</span><div class="stage" id="stage-agent"><i>05</i><div><b>Agent证据解释</b><small class="state">等待运行</small></div></div></div><div class="run-id" id="runId">NO RUN</div></section>
-<section class="agent-deck panel" id="agentDeck" data-state="idle" aria-label="量化审计流程动态可视化">
- <div class="deck-head"><div><span class="deck-kicker">RESEARCH SYSTEM / LIVE MAP</span><h2>研究流程控制舱 <small>DATA → DECISION → AUDIT</small></h2></div><div class="deck-status"><i></i><span id="deckStatus" aria-live="polite">等待审计请求</span></div></div>
- <div class="deck-network">
-  <div class="deck-track" aria-hidden="true"><i></i><i></i><i></i></div>
-  <div class="deck-node tone-cyan"><div class="deck-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><circle class="icon-orbit" cx="24" cy="24" r="18"/><path d="M9 28h7l4-13 7 21 5-13h7"/><circle class="icon-dot" cx="38" cy="23" r="2.5"/></svg></div><span class="deck-num">01 / INGEST</span><b>行情快照</b><small>来源 · 日期 · 哈希</small></div>
-  <div class="deck-node tone-pink"><div class="deck-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 7v34M8 16h32M12 16l-7 13h14L12 16Zm24 0-7 13h14L36 16ZM16 41h16"/><circle class="icon-dot" cx="24" cy="7" r="2.5"/></svg></div><span class="deck-num">02 / SIGNAL</span><b>策略信号</b><small>收盘信号 · 次日执行</small></div>
-  <div class="deck-node tone-violet"><div class="deck-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 37V11m0 26h33M13 31l8-9 7 5 12-15"/><path class="icon-dash" d="m31 12 9 0-1 9"/><circle class="icon-dot" cx="21" cy="22" r="2.5"/></svg></div><span class="deck-num">03 / REPLAY</span><b>多引擎回测</b><small>事件账本 · 批量账本</small></div>
-  <div class="deck-node tone-amber"><div class="deck-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 6 41 15v18l-17 9L7 33V15L24 6Z"/><path d="m7 15 17 10 17-10M24 25v17"/><path class="icon-dash" d="m17 13 16 9"/><circle class="icon-dot" cx="24" cy="25" r="2.5"/></svg></div><span class="deck-num">04 / AUDIT</span><b>一致性审计</b><small>净值差异 · 成交差异</small></div>
-  <div class="deck-node tone-green"><div class="deck-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M11 9h26v30H11zM17 17h14M17 23h14M17 29h8"/><path class="icon-dash" d="m27 34 4 4 9-11"/><circle class="icon-dot" cx="37" cy="10" r="2.5"/></svg></div><span class="deck-num">05 / EVIDENCE</span><b>证据解释</b><small>规则摘要 · 可选 LLM</small></div>
+<section class="control-room panel" id="agentDeck" data-state="idle" aria-label="量化研究控制舱">
+ <div class="room-topline"><div><span class="deck-kicker">GROKBOT-STYLE RESEARCH DESK / QUANT AUDIT LAB</span><h2>量化研究控制舱 <small>真实行情 · 可追溯回测 · 人工复核</small></h2></div><div class="deck-status"><i></i><span id="deckStatus" aria-live="polite">等待审计请求</span></div></div>
+ <div class="module-grid" aria-label="系统模块">
+  <div class="module-tile cyan"><i class="module-glyph glyph-radar">◉</i><span><b>AKSHARE</b><small>行情接入</small></span><em>DATA</em></div>
+  <div class="module-tile pink"><i class="module-glyph glyph-cross">⌖</i><span><b>SCANNER</b><small>标的 / 区间</small></span><em>INPUT</em></div>
+  <div class="module-tile blue"><i class="module-glyph glyph-signal">⌁</i><span><b>SIGNAL</b><small>均线 / 因子</small></span><em>RULE</em></div>
+  <div class="module-tile violet"><i class="module-glyph glyph-engine">⟳</i><span><b>FRAMEBT</b><small>因果回放</small></span><em>ENGINE</em></div>
+  <div class="module-tile green"><i class="module-glyph glyph-ledger">▤</i><span><b>LEDGER × 2</b><small>独立账本</small></span><em>REPLAY</em></div>
+  <div class="module-tile amber"><i class="module-glyph glyph-risk">⬡</i><span><b>RISK GATE</b><small>一致性门禁</small></span><em>CHECK</em></div>
+  <div class="module-tile pink"><i class="module-glyph glyph-agent">✳</i><span><b>EVIDENCE AGENT</b><small>证据解释</small></span><em>OPT-IN</em></div>
+  <div class="module-tile cyan"><i class="module-glyph glyph-human">◎</i><span><b>HUMAN DESK</b><small>研究员签核</small></span><em>REVIEW</em></div>
  </div>
- <div class="deck-foot"><span>动效展示审计请求状态；节点对应实际流程模块</span><span>LLM 默认关闭 · 人工复核保留</span></div>
+ <div class="room-grid">
+  <div class="room-screen">
+   <div class="screen-head"><div><span class="screen-label">PORTFOLIO EQUITY / RMB</span><b><span id="roomSymbol">600519</span><span class="screen-divider">/</span><span id="roomWindow">3Y DAILY</span></b></div><div class="legend"><span><i style="background:#56e0bc"></i>事件账本</span><span><i style="background:#a78bfa"></i>批量账本</span><span><i style="background:#ffb14a"></i>framebt</span></div></div>
+   <div class="screen-plot"><div class="room-grid-lines" aria-hidden="true"></div><svg class="room-connections" viewBox="0 0 1000 420" preserveAspectRatio="none" aria-hidden="true"><path d="M42 355 C180 330 175 106 330 122 S514 310 636 214 816 70 958 104"/><path d="M12 190 C180 207 198 340 364 324 S522 106 696 139 832 314 990 258"/><circle cx="165" cy="193" r="4"/><circle cx="362" cy="324" r="4"/><circle cx="636" cy="214" r="4"/><circle cx="816" cy="112" r="4"/></svg>
+    <div class="empty room-empty" id="chartEmpty"><div class="idle-orbit"><i></i><i></i><i></i><b>QA</b></div><strong>研究环境待命</strong><span>配置标的并运行审计后，载入真实多引擎净值曲线</span></div>
+    <svg class="chart room-chart" id="chart" viewBox="0 0 900 290" preserveAspectRatio="none" style="display:none"></svg>
+    <div class="robot robot-a" aria-hidden="true"><i class="antenna"></i><b>◡</b><small>DATA</small></div><div class="robot robot-b" aria-hidden="true"><i class="antenna"></i><b>··</b><small>RISK</small></div><div class="robot robot-c" aria-hidden="true"><i class="antenna"></i><b>⌣</b><small>AGENT</small></div>
+   </div>
+   <div class="screen-foot"><span id="roomSource">AKSHARE PUBLIC DAILY BARS · 等待行情快照</span><span id="roomRun">NO RUN</span></div>
+  </div>
+  <aside class="room-sidebar">
+   <div class="side-cap"><span>CREW / MODULE STATUS</span><b>研究代理舱</b></div>
+   <div class="crew-card cyan"><div class="crew-bot"><i></i><b>⌁</b></div><div><b>数据采集</b><small>AKShare · snapshot</small></div><em id="crewData">READY</em></div>
+   <div class="crew-card pink"><div class="crew-bot"><i></i><b>⌖</b></div><div><b>信号生成</b><small>MA / imported factor</small></div><em id="crewSignal">READY</em></div>
+   <div class="crew-card violet"><div class="crew-bot"><i></i><b>↗</b></div><div><b>双引擎回放</b><small>framebt · ledgers</small></div><em id="crewReplay">READY</em></div>
+   <div class="crew-card amber"><div class="crew-bot"><i></i><b>⬡</b></div><div><b>审计门禁</b><small>NAV / fill mismatch</small></div><em id="crewAudit">READY</em></div>
+   <div class="crew-card green"><div class="crew-bot"><i></i><b>✳</b></div><div><b>证据 Agent</b><small>rules first · optional LLM</small></div><em id="crewAgent">READY</em></div>
+   <div class="room-readout"><span>SNAPSHOT ROWS</span><b id="roomRows">—</b><span>GATE / MAX NAV GAP</span><b><span id="roomGate">—</span><small id="roomGap">等待审计</small></b></div>
+  </aside>
+ </div>
+ <div class="room-bottom"><div class="room-flow"><span>01 SNAPSHOT</span><i></i><span>02 SIGNAL</span><i></i><span>03 REPLAY</span><i></i><span>04 AUDIT</span><i></i><span>05 REVIEW</span></div><div class="room-note">动画表示请求状态 · 模块不是独立自治 Agent · 不接交易下单</div></div>
 </section>
 <div class="layout"><aside class="panel controls"><h2 class="panel-title">审计运行配置 <span style="color:var(--teal);font:10px 'DM Mono'">LIVE DATA</span></h2>
 <div class="field"><label>沪深 A 股代码 <span>6 位数字</span></label><input id="symbol" value="600519" maxlength="6"></div>
@@ -29,7 +51,6 @@
 <button class="button" id="run">运行审计　→</button><p class="note">行情通过 AkShare 公共日线接口实时获取。信号在收盘后生成，下一交易日开盘成交；模型近似处理 T+1、板块涨跌幅、佣金、卖出印花税与滑点。结果仅用于研究演示。</p>
 <details class="research-import"><summary>接入 RD-Agent(Q) 因子分数</summary><p>从 RD-Agent/Qlib 研究结果导出 point-in-time 分数 JSON。此处不执行模型生成的代码，分数仅转换为多/空仓目标状态后交给 framebt 与双账本复算。</p><input id="factorFile" type="file" accept="application/json,.json"><div class="grid2"><input id="factorName" placeholder="因子名称"><input id="experimentId" placeholder="实验 ID"></div><div class="field"><label>持仓阈值（score ≥ threshold 买入）</label><input id="factorThreshold" type="number" value="0" step="0.01"></div><button class="button secondary" id="replayFactor">导入信号并复算　→</button><small class="schema-hint">JSON 格式：{ "scores": [{"date":"2025-01-02","score":0.42}] }</small></details></aside>
 <section class="right"><div class="kpis"><div class="panel kpi"><label>Promotion Gate</label><strong class="gate" id="gate">—</strong><span id="gateSub">等待审计运行</span></div><div class="panel kpi"><label>Max NAV Gap</label><strong id="gap">—</strong><span>事件账本 vs 批量账本</span></div><div class="panel kpi"><label>Trade Mismatches</label><strong id="mismatch">—</strong><span>逐笔成交记录差异</span></div><div class="panel kpi"><label>Data Snapshot</label><strong id="rows">—</strong><span id="snap">等待行情快照</span></div></div>
-<div class="panel chart-panel"><div class="charthead"><h2>多引擎权益曲线 <small>PORTFOLIO EQUITY / RMB</small></h2><div class="legend"><span><i style="background:#56e0ba"></i>事件账本</span><span><i style="background:#a78bfa"></i>批量账本</span><span><i style="background:#ffb14a"></i>framebt上游引擎</span></div></div><div class="empty" id="chartEmpty"><div><div class="icon">⌁</div>配置股票与日期，运行真实行情回测<br>比较两套项目账本，并观察 framebt 上游引擎结果</div></div><svg class="chart" id="chart" viewBox="0 0 900 290" preserveAspectRatio="none" style="display:none"></svg><div class="chart-foot"><span>同源行情快照 · 交易假设和执行语义可能不同</span><span>一致性门禁只比较两套项目账本</span></div></div>
 <div class="panel delta-panel"><div class="charthead"><h2>日度净值偏差 <small>DAILY IMPLEMENTATION GAP</small></h2><span id="deltaSummary" class="delta-summary">等待数据</span></div><div class="empty delta-empty" id="deltaEmpty">审计后显示逐日净值差额，让偏差日期一眼可见。</div><svg class="delta-chart" id="deltaChart" viewBox="0 0 900 150" preserveAspectRatio="none" style="display:none"></svg></div>
 <div class="sourcebar" id="source">数据源与快照信息将在运行后显示。 <b>PASS 只表示账本在当前假设下相互一致，不代表策略有效。</b></div>
 <div class="bottom"><div class="panel section"><h2>LangGraph 量化审计 Agent <span id="agentMode" class="badge">未运行</span></h2><div class="audit-copy" id="agentText">Agent 先执行零 Token 规则摘要；勾选后可单次调用模型解释最多 4 条证据。Agent 不生成买卖建议，不修改指标或门禁。</div><h2 style="margin-top:18px">差异证据</h2><div class="evid" id="evidence"><div class="note">暂无审计证据</div></div></div>
@@ -45,7 +66,9 @@ let activeRunId=null;
 fetch('/api/health').then(r=>r.json()).then(()=>{$('apiStatus').textContent='● API ONLINE'}).catch(()=>{$('apiStatus').textContent='● API OFFLINE'});
 function money(n){return new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2}).format(n)}
 function escapeHtml(value){return String(value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
-function deckState(state){const deck=$('agentDeck');deck.dataset.state=state;$('deckStatus').textContent=({idle:'等待审计请求',running:'审计请求处理中',complete:'审计完成 · 结果已载入',failed:'请求失败 · 请检查错误信息'})[state]||state}
+function deckState(state){const deck=$('agentDeck');deck.dataset.state=state;$('deckStatus').textContent=({idle:'等待审计请求',running:'审计请求处理中',complete:'审计完成 · 结果已载入',failed:'请求失败 · 请检查错误信息'})[state]||state;for(const id of ['crewData','crewSignal','crewReplay','crewAudit','crewAgent'])$(id).textContent=state==='running'?'BUSY':state==='complete'?'LOADED':'READY'}
+function updateRoomInputs(){ $('roomSymbol').textContent=$('symbol').value||'—';$('roomWindow').textContent=`${$('start').value||'START'} → ${$('end').value||'END'}` }
+['symbol','start','end'].forEach(id=>$(id).addEventListener('input',updateRoomInputs));updateRoomInputs();
 function stages(states){for(const [id,label] of Object.entries(states)){const el=$('stage-'+id);el.classList.remove('active','done');el.querySelector('.state').textContent=label;if(label==='处理中')el.classList.add('active');if(label==='完成')el.classList.add('done')}}
 function draw(data){
  const svg=$('chart'),W=900,H=290,p={l:64,r:18,t:16,b:28},vals=data.daily.flatMap(d=>[d.event,d.vector,d.framebt].filter(Number.isFinite));
@@ -76,7 +99,7 @@ async function runPipeline(endpoint,extra,btn){
  try{
   const body={symbol:$('symbol').value,start_date:$('start').value,end_date:$('end').value,fast_window:+$('fast').value,slow_window:+$('slow').value,initial_cash:+$('cash').value,slippage_bps:+$('slip').value,commission_bps:+$('fee').value,use_llm:$('useLlm').checked,...extra};
   const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await res.json();if(!res.ok)throw Error(d.detail||'审计失败');
-  const s=d.summary;activeRunId=d.run_id;$('runId').textContent='RUN '+d.run_id.slice(0,8).toUpperCase();
+  const s=d.summary;activeRunId=d.run_id;$('runId').textContent='RUN '+d.run_id.slice(0,8).toUpperCase();$('roomRun').textContent='RUN '+d.run_id.slice(0,8).toUpperCase();$('roomSymbol').textContent=d.provenance.symbol;$('roomWindow').textContent=`${d.provenance.start} → ${d.provenance.end}`;$('roomSource').textContent=`${d.provenance.provider} · ${d.provenance.rows} BARS · SHA ${d.provenance.snapshot_sha256.slice(0,10)}`;$('roomRows').textContent=d.provenance.rows;$('roomGate').textContent=s.gate;$('roomGap').textContent='¥'+money(s.max_abs_nav_gap);
   deckState('complete');
   stages({data:'完成',signal:'完成',ledgers:'完成',audit:'完成',agent:'完成'});
   $('gate').textContent=s.gate;$('gate').parentElement.classList.toggle('block',s.gate==='BLOCK');$('gateSub').textContent=s.gate==='PASS'?'可提交人工复核':'阻断晋级，核对偏差';$('gap').textContent='¥'+money(s.max_abs_nav_gap);$('mismatch').textContent=s.fill_mismatch_count;$('rows').textContent=d.provenance.rows;$('snap').textContent=d.provenance.snapshot_sha256.slice(0,12)+'…';draw(d);
