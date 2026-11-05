@@ -100,6 +100,9 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
     gate = "PASS" if max_gap <= .01 and fill_diff == 0 else "BLOCK"
     progress("reconciliation", "completed", "一致性门禁已计算", gate=gate, max_nav_gap=max_gap,
              fill_mismatches=fill_diff, divergent_days=divergent)
+    progress("risk_gate", "started", "依据账本净值差与逐笔成交差异评估晋级门禁")
+    progress("risk_gate", "completed", "确定性门禁结论已生成；不代表策略收益或投资风险评价",
+             gate=gate, approval_allowed=gate == "PASS", max_nav_gap=max_gap, fill_mismatches=fill_diff)
     summary = {"max_abs_nav_gap": max_gap, "divergent_days": divergent, "fill_mismatch_count": fill_diff,
                "gate": gate, "event_metrics": _metrics(event_curve), "vector_metrics": _metrics(vector_curve),
                "framebt_metrics": _metrics(framebt_curve),
