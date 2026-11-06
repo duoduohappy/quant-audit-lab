@@ -295,7 +295,9 @@ def latest_run_artifact():
     """Return the complete most recent saved audit so its review can resume after refresh."""
     latest = _latest_run_path()
     if latest is None:
-        raise HTTPException(status_code=404, detail="还没有已保存的审计运行。")
+        # An empty workspace is a normal first-visit state, not an HTTP error.
+        # This avoids noisy console errors while preserving an explicit empty state.
+        return {"status": "empty", "run": None}
     try:
         return json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
