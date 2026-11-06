@@ -6,6 +6,7 @@ import hashlib
 import os
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -30,6 +31,8 @@ _OPS = {"requests": 0, "active": 0, "last_request_at": None,
         "last_latency_ms": None, "last_status": None}
 _QUOTE_LOCK = threading.Lock()
 _QUOTE_CACHE: dict[str, dict] = {}
+_QUOTE_HISTORY: dict[str, deque] = {}
+_QUOTE_HISTORY_MAX_SAMPLES = 720
 _QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "20")))
 _QUOTE_FAILURE_UNTIL = 0.0
 _QUOTE_STATS = {"requests": 0, "provider_successes": 0, "provider_failures": 0,
@@ -243,7 +246,10 @@ def telemetry():
                                 "stale": entry["payload"].get("stale"),
                                 "source_age_seconds": entry["payload"].get("source_age_seconds"),
                                 "last_error": quote_stats.get("last_error"),
-                                "age_seconds": max(0, int(time.time() - entry["_cached_epoch"]))}
+                                "age_seconds": max(0, int(time.time() - entry["_cached_epoch"])),
+                                "history_samples": len(_QUOTE_HISTORY.get(symbol, ())),
+                                "history_latest_at": (_QUOTE_HISTORY[symbol][-1].get("observed_at")
+                                                      if _QUOTE_HISTORY.get(symbol) else None)}
                        for symbol, entry in _QUOTE_CACHE.items()}
     return {
         "sampled_at": datetime.now(timezone.utc).isoformat(),
@@ -262,6 +268,9 @@ def telemetry():
                        "status": "cooldown" if _QUOTE_FAILURE_UNTIL > now else
                                   "available" if quote_cache else "not_requested",
                        "cache_ttl_seconds": _QUOTE_TTL_SECONDS,
+                       "history_max_samples": _QUOTE_HISTORY_MAX_SAMPLES,
+                       "history_storage": "process_memory",
+                       "history_note": "报价采样仅在当前服务进程内保留；进程重启后清空。",
                        "cooldown_seconds": max(0, int(_QUOTE_FAILURE_UNTIL - now)),
                        "stats": quote_stats, "symbols": quote_cache},
         "latest_run": latest_run,
@@ -311,12 +320,16 @@ def market_quote(symbol: str):
         _QUOTE_STATS["requests"] += 1
         if cached and now - cached["_cached_epoch"] < _QUOTE_TTL_SECONDS:
             _QUOTE_STATS["cache_hits"] += 1
-            return {**cached["payload"], "cache_hit": True,
+            return {**cached["payload"], "history": list(_QUOTE_HISTORY.get(symbol, ())),
+                    "history_max_samples": _QUOTE_HISTORY_MAX_SAMPLES,
+                    "history_storage": "process_memory", "cache_hit": True,
                     "cache_age_seconds": int(now - cached["_cached_epoch"]),
                     "refresh_after_seconds": max(0, int(_QUOTE_TTL_SECONDS - (now - cached["_cached_epoch"]))) }
         if now < _QUOTE_FAILURE_UNTIL:
             if cached:
-                return {**cached["payload"], "cache_hit": True, "stale": True,
+                return {**cached["payload"], "history": list(_QUOTE_HISTORY.get(symbol, ())),
+                        "history_max_samples": _QUOTE_HISTORY_MAX_SAMPLES,
+                        "history_storage": "process_memory", "cache_hit": True, "stale": True,
                         "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
                         "refresh_after_seconds": int(_QUOTE_FAILURE_UNTIL - now),
                         "warning": "行情源处于故障冷却期，返回最近成功快照。"}
@@ -357,18 +370,27 @@ def market_quote(symbol: str):
                 "stale": is_stale, "freshness": "LIVE" if not is_stale else "STALE_OR_UNVERIFIED",
             }
             _QUOTE_CACHE[symbol] = {"payload": payload, "_cached_epoch": now}
+            history = _QUOTE_HISTORY.setdefault(symbol, deque(maxlen=_QUOTE_HISTORY_MAX_SAMPLES))
+            source_key = payload["source_timestamp"] or payload["observed_at"]
+            if not history or history[-1].get("source_key") != source_key:
+                history.append({"source_key": source_key, "source_timestamp": payload["source_timestamp"],
+                                "observed_at": payload["observed_at"], "price": price})
             _QUOTE_FAILURE_UNTIL = 0.0
             _QUOTE_STATS["provider_successes"] += 1
             _QUOTE_STATS["last_success_at"] = payload["observed_at"]
             _QUOTE_STATS["last_error"] = None
-            return {**payload, "cache_hit": False, "cache_age_seconds": 0,
+            return {**payload, "history": list(history),
+                    "history_max_samples": _QUOTE_HISTORY_MAX_SAMPLES,
+                    "history_storage": "process_memory", "cache_hit": False, "cache_age_seconds": 0,
                     "refresh_after_seconds": _QUOTE_TTL_SECONDS}
         except Exception as exc:
             _QUOTE_FAILURE_UNTIL = time.time() + 30
             _QUOTE_STATS["provider_failures"] += 1
             _QUOTE_STATS["last_error"] = f"{type(exc).__name__}: {str(exc)[:220]}"
             if cached:
-                return {**cached["payload"], "cache_hit": True, "stale": True,
+                return {**cached["payload"], "history": list(_QUOTE_HISTORY.get(symbol, ())),
+                        "history_max_samples": _QUOTE_HISTORY_MAX_SAMPLES,
+                        "history_storage": "process_memory", "cache_hit": True, "stale": True,
                         "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
                         "refresh_after_seconds": 0, "warning": f"行情源暂不可用：{type(exc).__name__}"}
             raise HTTPException(status_code=502, detail=f"实时行情暂不可用：{type(exc).__name__}: {str(exc)[:220]}") from exc
