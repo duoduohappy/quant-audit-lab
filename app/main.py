@@ -230,6 +230,32 @@ class AuditRequest(BaseModel):
 class ReviewDecision(BaseModel):
     decision: Literal["approve", "block"]
     reason: str = Field(min_length=3, max_length=500)
+    reviewer: str = Field(min_length=1, max_length=120)
+    due_at: str = Field(min_length=1, max_length=40)
+
+    @field_validator("reason", "reviewer", "due_at")
+    @classmethod
+    def normalize_required_review_fields(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("复核原因、复核人和截止时间均为必填项")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def validate_review_reason_length(cls, value: str) -> str:
+        if len(value) < 3:
+            raise ValueError("复核原因至少需要 3 个字符")
+        return value
+
+    @field_validator("due_at")
+    @classmethod
+    def validate_review_deadline(cls, value: str) -> str:
+        try:
+            datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("截止时间必须是有效的 ISO 日期时间") from exc
+        return value
 
 
 class FactorScore(BaseModel):
@@ -635,6 +661,7 @@ def record_decision(run_id: UUID, decision: ReviewDecision):
     if decision.decision == "approve" and record.get("summary", {}).get("gate") != "PASS":
         raise HTTPException(status_code=409, detail="审计门禁未通过，不能批准策略版本。")
     record["human_review"] = {"decision": decision.decision, "reason": decision.reason.strip(),
+                              "reviewer": decision.reviewer.strip(), "due_at": decision.due_at.strip(),
                               "reviewed_at": datetime.now(timezone.utc).isoformat()}
     trace = record.setdefault("spider_trace", {})
     events = trace.setdefault("events", [])
@@ -645,7 +672,8 @@ def record_decision(run_id: UUID, decision: ReviewDecision):
                        "label": "研究员人工复核决定已持久化", "time": last_bar.get("time"),
                        "bar_index": len(bars) - 1 if bars else None,
                        "value": last_bar.get("close"), "decision": decision.decision,
-                       "reason": decision.reason.strip(), "reviewed_at": record["human_review"]["reviewed_at"]})
+                       "reason": decision.reason.strip(), "reviewer": decision.reviewer.strip(),
+                       "due_at": decision.due_at.strip(), "reviewed_at": record["human_review"]["reviewed_at"]})
     temp = artifact.with_suffix(".tmp")
     temp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(artifact)

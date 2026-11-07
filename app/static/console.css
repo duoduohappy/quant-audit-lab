@@ -253,3 +253,88 @@
 }
 .book-history{margin-top:10px;padding-top:9px;border-top:1px solid #ffffff14}.book-history-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px}.book-history-title b{font-size:9px}.book-history-title small{color:var(--muted);font:7px "DM Mono"}.book-history-controls{display:grid;grid-template-columns:1fr 1fr auto;gap:5px;align-items:end}.book-history-controls label{display:grid;gap:3px;color:var(--muted);font-size:8px}.book-history-controls input{width:100%;min-width:0;height:28px;padding:0 5px;border:1px solid #333644;border-radius:5px;background:#0b0d13;color:var(--ink);font:8px "DM Mono";color-scheme:dark}.book-history-controls button{height:28px;padding:0 9px;border:1px solid #56e0bc66;border-radius:5px;background:#12332e;color:var(--teal);font-size:8px;cursor:pointer}.book-history-controls button:disabled{opacity:.55}.book-history-results{display:grid;gap:4px;max-height:112px;overflow:auto;margin-top:7px;color:var(--muted);font-size:8px;line-height:1.5}.book-history-item{display:flex;justify-content:space-between;gap:6px;padding:5px 7px;border:1px solid #ffffff12;border-radius:4px;background:#0b0d13;color:#d8d5e0;text-align:left;font:7px "DM Mono";cursor:pointer}.book-history-item:hover{border-color:#56e0bc66}.book-history-item span{color:var(--muted)}.book-history-detail{margin-top:6px;padding:7px;border:1px solid #a78bfa44;border-radius:5px;background:#0b0d13}.book-history-detail[hidden]{display:none}.book-history-detail-head{margin-bottom:5px;color:var(--violet);font:7px/1.5 "DM Mono"}.book-history-levels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 8px;color:#d8d5e0;font:7px "DM Mono"}
 
+/* Reference-workbench alignment: keep every requested business module visible
+   and give its tables a usable scroll area instead of squeezing columns. */
+.workbench-grid{grid-template-columns:112px minmax(230px,258px) minmax(0,1fr) minmax(250px,286px)!important;grid-template-areas:none!important;gap:10px!important;align-items:start!important}
+.workbench-grid>.side-nav,.workbench-grid>.config-stack,.workbench-grid>.workbench-main,.workbench-grid>.workbench-side{grid-area:auto!important;grid-column:auto!important;grid-row:auto!important}
+.workbench-main{grid-template-columns:minmax(0,1fr)!important;gap:9px!important}
+.workbench-side{grid-template-columns:minmax(0,1fr)!important;gap:9px!important}
+.workbench-side>.room-sidebar,.workbench-side>.sourcebar{grid-column:auto!important;width:auto!important;min-width:0!important;position:static!important;inset:auto!important}
+.quote-desk{grid-template-columns:minmax(0,1.2fr) minmax(250px,.8fr)!important;align-items:stretch}
+.headline-panel{display:block;min-width:0}
+.headline-metrics{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px}
+.headline-metrics article{min-height:90px;padding:11px;border-top:2px solid var(--pink)}
+.headline-metrics article:nth-child(2){border-top-color:var(--teal)}
+.headline-metrics article:nth-child(3){border-top-color:var(--amber)}
+.headline-metrics article:nth-child(4){border-top-color:var(--violet)}
+.backtest-plot-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:0}
+.backtest-plot-panel>.room-screen{min-width:0}
+.backtest-plot-panel .screen-plot{height:clamp(260px,23vw,390px)!important}
+.backtest-plot-panel>.drawdown-panel{min-width:0}
+.metrics-detail{min-width:0}
+.engine-details,.daily-details{min-width:0}
+.engine-details .table-wrap,.daily-details .table-wrap{overflow:auto;overscroll-behavior:contain}
+.engine-details .table{min-width:640px!important}
+.daily-details .table{min-width:690px!important}
+.results-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:9px!important;align-items:start}
+.results-grid>.panel,.results-grid>.diff-stack{min-width:0;max-width:100%;overflow:hidden}
+.results-grid .table-wrap{max-width:100%;overflow:auto;overscroll-behavior:contain}
+.results-grid .table{min-width:610px!important}
+.results-grid .review .table{min-width:0!important}
+.diff-stack{grid-template-columns:minmax(0,1fr)!important;min-width:0}
+.diff-stack>.delta-panel{min-width:0}
+.diff-stack .daily-details{min-width:0}
+.live-ops{min-width:0}
+.live-ops .ops-bottom{grid-template-columns:minmax(0,1.55fr) minmax(260px,.45fr)!important;align-items:start}
+.live-ops .kline-desk{grid-column:auto!important;min-width:0}
+.side-nav{min-width:0}
+
+@media(max-width:1550px){
+ .workbench-grid{grid-template-columns:minmax(260px,300px) minmax(0,1fr)!important;grid-template-areas:"nav nav" "config main" "config side"!important;gap:10px!important}
+ .workbench-grid>.side-nav{display:flex!important;position:static;grid-area:nav!important;grid-column:1/-1!important;grid-row:1!important;min-height:0;align-items:center;gap:4px;overflow-x:auto;overscroll-behavior-x:contain;padding:6px;white-space:nowrap}
+ .side-nav .nav-brand{flex:0 0 auto;padding:4px 8px 4px 4px}
+ .side-nav .nav-note{display:none}
+ .side-nav a{flex:0 0 auto;margin:0;padding:8px 9px}
+ .workbench-grid>.config-stack{grid-area:config!important;grid-column:1!important;grid-row:2/4!important}
+ .workbench-grid>.workbench-main{grid-area:main!important;grid-column:2!important;grid-row:2!important}
+ .workbench-grid>.workbench-side{grid-area:side!important;grid-column:2!important;grid-row:3!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .workbench-side>.room-sidebar,.workbench-side>.sourcebar{grid-column:1/-1!important}
+ .results-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .backtest-plot-panel .screen-plot{height:300px!important}
+}
+@media(max-width:1120px){
+ .workbench-grid{grid-template-columns:minmax(0,1fr)!important;grid-template-areas:"nav" "config" "main" "side"!important}
+ .workbench-grid>.side-nav{grid-area:nav!important;grid-column:1!important;grid-row:auto!important}
+ .workbench-grid>.config-stack,.workbench-grid>.workbench-main,.workbench-grid>.workbench-side{grid-column:1!important;grid-row:auto!important}
+ .workbench-grid>.config-stack{grid-area:config!important}
+ .workbench-grid>.workbench-main{grid-area:main!important}
+ .workbench-grid>.workbench-side{grid-area:side!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .workbench-side>.room-sidebar,.workbench-side>.sourcebar{grid-column:1/-1!important}
+ .live-ops .ops-bottom{grid-template-columns:minmax(0,1fr)!important}
+}
+@media(max-width:760px){
+ .workbench-grid{gap:9px!important}
+ .quote-desk,.workbench-grid>.workbench-side,.results-grid,.live-ops .ops-metrics,.live-ops .ops-bottom{grid-template-columns:minmax(0,1fr)!important}
+ .workbench-side>.room-sidebar,.workbench-side>.sourcebar{grid-column:auto!important}
+ .headline-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .results-grid{gap:8px!important}
+ .results-grid>.panel,.results-grid>.diff-stack{width:100%}
+ .backtest-plot-panel .screen-plot{height:240px!important}
+ .live-ops .ops-bottom>.kline-desk{grid-column:auto!important}
+ .book-history-controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .book-history-controls button{grid-column:1/-1}
+ .side-nav{flex-wrap:wrap;white-space:normal}
+ .side-nav a{font-size:9px;padding:7px 8px}
+}
+
+/* The research navigation stays available at laptop/tablet widths; spider status
+   is compact and anchored to the top edge so it never covers charts or tables. */
+.spider-hud{top:12px!important;right:14px!important;bottom:auto!important;width:min(360px,calc(100vw - 28px));grid-template-columns:8px minmax(0,1fr) auto;max-height:104px;overflow:hidden}
+.spider-hud b,.spider-hud span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spider-hud time{white-space:nowrap}
+.review-controls{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+.review-controls label{display:grid;gap:4px;color:var(--muted);font-size:9px;min-width:0}
+.review-controls label:first-child{grid-column:1/-1}
+.review-controls label input{width:100%;min-width:0;height:34px;padding:0 9px;border:1px solid #383747;border-radius:5px;background:#0a0b11;color:var(--ink);font:10px "DM Mono",monospace}
+.review-controls button{min-width:0}
+
