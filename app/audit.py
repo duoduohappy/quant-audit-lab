@@ -27,6 +27,83 @@ def _metrics(curve: pd.DataFrame) -> dict:
             "sharpe": float(returns.mean() / returns.std(ddof=1) * np.sqrt(252)) if len(returns)>1 and returns.std(ddof=1) else 0}
 
 
+def _spider_research_trace(df: pd.DataFrame, signals: pd.Series, fills: pd.DataFrame,
+                           provenance: dict, fast: int, slow: int, gate: str,
+                           max_gap: float, fill_diff: int) -> tuple[list[dict], dict]:
+    """Build a compact, deterministic trace from the exact bars/signals/fills being audited."""
+    bars = df.reset_index(drop=True)
+    close = bars["close"].astype(float)
+    volume = bars["volume"].astype(float) if "volume" in bars else pd.Series(np.nan, index=bars.index)
+    fast_ma, slow_ma = close.rolling(fast, min_periods=fast).mean(), close.rolling(slow, min_periods=slow).mean()
+    prior_high = bars["high"].astype(float).shift(1).rolling(20, min_periods=20).max()
+    prior_volume = volume.shift(1).rolling(20, min_periods=10).mean()
+    fill_by_date: dict[str, list[dict]] = {}
+    for fill in fills.to_dict(orient="records") if len(fills) else []:
+        fill_by_date.setdefault(str(fill["date"]), []).append(fill)
+
+    rows, events = [], []
+    for i, row in bars.iterrows():
+        day = row.date.strftime("%Y-%m-%d")
+        fma = float(fast_ma.iloc[i]) if pd.notna(fast_ma.iloc[i]) else None
+        sma = float(slow_ma.iloc[i]) if pd.notna(slow_ma.iloc[i]) else None
+        prior_fma = float(fast_ma.iloc[i-1]) if i and pd.notna(fast_ma.iloc[i-1]) else None
+        prior_sma = float(slow_ma.iloc[i-1]) if i and pd.notna(slow_ma.iloc[i-1]) else None
+        state = int(signals.iloc[i])
+        features: list[dict] = []
+        if fma is not None and sma is not None and prior_fma is not None and prior_sma is not None:
+            if prior_fma <= prior_sma and fma > sma:
+                features.append({"type": "MA_CROSS_UP", "label": "快线上穿慢线", "value": round((fma + sma) / 2, 6)})
+            elif prior_fma >= prior_sma and fma < sma:
+                features.append({"type": "MA_CROSS_DOWN", "label": "快线下穿慢线", "value": round((fma + sma) / 2, 6)})
+        if pd.notna(prior_high.iloc[i]) and float(row.close) > float(prior_high.iloc[i]):
+            features.append({"type": "BREAKOUT_20D", "label": "收盘突破此前20日高点", "value": float(row.close),
+                             "reference": float(prior_high.iloc[i])})
+        vmean = float(prior_volume.iloc[i]) if pd.notna(prior_volume.iloc[i]) else None
+        current_volume = float(volume.iloc[i]) if pd.notna(volume.iloc[i]) else None
+        vol_ratio = current_volume / vmean if vmean and current_volume is not None else None
+        if vol_ratio is not None and vol_ratio >= 1.5:
+            features.append({"type": "VOLUME_SURGE_20D", "label": "成交量达到此前20日均量的1.5倍",
+                             "value": float(row.close), "volume_ratio": round(vol_ratio, 3),
+                             "volume": current_volume, "prior_volume_mean": vmean})
+        if i and int(signals.iloc[i-1]) != state:
+            features.append({"type": "STRATEGY_ENTRY" if state else "STRATEGY_EXIT",
+                             "label": "双均线策略目标仓位切换", "value": float(row.close),
+                             "execution": "信号收盘确认；下一交易日开盘执行"})
+        day_fills = fill_by_date.get(day, [])
+        for fill in day_fills:
+            features.append({"type": "FILL_" + str(fill["side"]), "label": "事件账本实际成交",
+                             "price": float(fill["price"]), "shares": int(fill["shares"]),
+                             "value": float(fill["price"]), "fee": float(fill["fee"])})
+        # Prefer the execution fact, then the strategy decision that caused it.
+        # This makes the spider's leg land on a real fill price whenever one exists.
+        primary = next((f for f in features if f["type"].startswith("FILL_")), None)
+        primary = primary or next((f for f in features if f["type"].startswith("STRATEGY_")), None)
+        primary = primary or next((f for f in features if f["type"].startswith("MA_CROSS")), None)
+        primary = primary or next((f for f in features if f["type"] == "BREAKOUT_20D"), None)
+        primary = primary or next((f for f in features if f["type"] == "VOLUME_SURGE_20D"), None)
+        row_volume = float(row["volume"]) if "volume" in row and pd.notna(row["volume"]) else 0.0
+        rows.append({"time": day, "open": float(row.open), "high": float(row.high), "low": float(row.low),
+                     "close": float(row.close), "volume": row_volume,
+                     "fast_ma": fma, "slow_ma": sma, "strategy_state": state,
+                     "features": features, "capture_feature": primary["type"] if primary else "CLOSE"})
+        for feature in features:
+            events.append({"time": day, "bar_index": i, "close": float(row.close),
+                           "fast_ma": fma, "slow_ma": sma, **feature})
+
+    ohlc_valid = bool(((bars.high >= bars[["open", "close", "low"]].max(axis=1)) &
+                       (bars.low <= bars[["open", "close", "high"]].min(axis=1))).all())
+    trace = {"version": "2", "source_sha256": provenance.get("snapshot_sha256"),
+             "bar_count": len(rows), "signal_count": int((signals.diff().fillna(0) != 0).sum()),
+             "fill_count": int(len(fills)), "feature_count": len(events),
+             "checks": {"ohlc_invariants": "PASS" if ohlc_valid else "FAIL",
+                        "finite_close": "PASS" if np.isfinite(close).all() else "FAIL",
+                        "ledger_gate": gate, "max_nav_gap": round(max_gap, 6),
+                        "fill_mismatches": fill_diff},
+             "method": "确定性规则扫描真实 OHLCV 与本次策略信号；不调用 LLM，不生成订单。",
+             "events": events}
+    return rows, trace
+
+
 def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
               research_candidate: dict | None = None, progress_callback=None) -> dict:
     def progress(stage: str, state: str, message: str, **details):
@@ -114,6 +191,19 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
     if not evidence:
         evidence = [{"id":"DATA-EMPTY","type":"warning","detail":"无重叠的可审计权益序列"}]
     fill_records = event_fills.to_dict(orient="records") if len(event_fills) else []
+    market_bars, spider_trace = _spider_research_trace(
+        df, signals, event_fills, provenance, fast, slow, gate, max_gap, fill_diff)
+    trace_time = market_bars[-1]["time"]
+    trace_index = len(market_bars) - 1
+    spider_trace["events"].extend([
+        {"type": "RECONCILIATION_" + gate, "label": "双账本一致性核对完成", "time": trace_time,
+         "bar_index": trace_index, "value": market_bars[-1]["close"], "max_nav_gap": max_gap,
+         "fill_mismatches": fill_diff},
+        {"type": "RISK_GATE_" + gate, "label": "确定性风险门禁结论", "time": trace_time,
+         "bar_index": trace_index, "value": market_bars[-1]["close"], "gate": gate},
+        {"type": "EVIDENCE_READY", "label": "审计证据包已生成", "time": trace_time,
+         "bar_index": trace_index, "value": market_bars[-1]["close"], "evidence_count": len(evidence)},
+    ])
     output = {"run_id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat(),
               "provenance": provenance, "config": {"symbol":symbol,"fast_window":fast,"slow_window":slow,
               "initial_cash":cash,"slippage_bps":slip,"commission_bps":commission,
@@ -124,6 +214,7 @@ def run_audit(payload: dict, *, signal_scores: dict[str, float] | None = None,
                          "framebt":round(float(r.equity_framebt),2) if pd.notna(r.equity_framebt) else None,
                          "gap":round(float(r.gap),4)} for r in daily.itertuples()],
               "fills":fill_records, "framebt_fills":framebt_fills.to_dict(orient="records"), "evidence":evidence,
+              "market_bars": market_bars, "spider_trace": spider_trace,
               "limitations":["使用未复权日线；分红送转、ST 特殊涨跌幅、停牌撮合与交易所规则细节未完整建模。",
                              "framebt 已实际运行，但它与项目内账本的成交手数、成本和涨跌停假设可能不同；净值只作交叉观察，不将其差异误判为账本故障。",
                              "两套项目内账本的一致性门禁不代表策略有效；历史回测不代表未来收益。"]}

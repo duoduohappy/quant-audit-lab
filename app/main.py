@@ -636,6 +636,16 @@ def record_decision(run_id: UUID, decision: ReviewDecision):
         raise HTTPException(status_code=409, detail="审计门禁未通过，不能批准策略版本。")
     record["human_review"] = {"decision": decision.decision, "reason": decision.reason.strip(),
                               "reviewed_at": datetime.now(timezone.utc).isoformat()}
+    trace = record.setdefault("spider_trace", {})
+    events = trace.setdefault("events", [])
+    if not any(event.get("type") == "HUMAN_REVIEW_" + decision.decision.upper() for event in events):
+        bars = record.get("market_bars") or []
+        last_bar = bars[-1] if bars else {}
+        events.append({"type": "HUMAN_REVIEW_" + decision.decision.upper(),
+                       "label": "研究员人工复核决定已持久化", "time": last_bar.get("time"),
+                       "bar_index": len(bars) - 1 if bars else None,
+                       "value": last_bar.get("close"), "decision": decision.decision,
+                       "reason": decision.reason.strip(), "reviewed_at": record["human_review"]["reviewed_at"]})
     temp = artifact.with_suffix(".tmp")
     temp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(artifact)
