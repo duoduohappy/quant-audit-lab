@@ -4,6 +4,7 @@ import math
 import json
 import hashlib
 import os
+import sqlite3
 import threading
 import time
 from collections import deque
@@ -11,11 +12,12 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 from dotenv import load_dotenv
+import pandas as pd
 
 from app.audit import run_audit
 from app.providers import akshare_provider as market_provider
@@ -32,13 +34,56 @@ _OPS = {"requests": 0, "active": 0, "last_request_at": None,
 _QUOTE_LOCK = threading.Lock()
 _QUOTE_CACHE: dict[str, dict] = {}
 _QUOTE_HISTORY: dict[str, deque] = {}
+_KLINE_LOCK = threading.Lock()
+_KLINE_CACHE: dict[str, dict] = {}
 _QUOTE_HISTORY_MAX_SAMPLES = 720
-_QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "20")))
+_QUOTE_TTL_SECONDS = max(10, int(os.getenv("LIVE_QUOTE_TTL_SECONDS", "10")))
 _QUOTE_FAILURE_UNTIL = 0.0
 _QUOTE_STATS = {"requests": 0, "provider_successes": 0, "provider_failures": 0,
                 "cache_hits": 0, "last_success_at": None, "last_error": None}
+_BOOK_HISTORY_DB = ROOT.parent / "data" / "orderbook_history.sqlite3"
 _RUN_PROGRESS_LOCK = threading.Lock()
 _RUN_PROGRESS: dict[str, dict] = {}
+
+
+def _book_history_connection():
+    _BOOK_HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(_BOOK_HISTORY_DB, timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        source_timestamp TEXT,
+        stale INTEGER NOT NULL,
+        price REAL NOT NULL,
+        bids_json TEXT NOT NULL,
+        asks_json TEXT NOT NULL
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_book_symbol_observed ON orderbook_snapshots(symbol, observed_at)")
+    return conn
+
+
+def _save_orderbook_snapshot(payload: dict):
+    """Persist only an actual upstream response, not a cache replay."""
+    with _book_history_connection() as conn:
+        conn.execute(
+            "INSERT INTO orderbook_snapshots(symbol, provider, observed_at, source_timestamp, stale, price, bids_json, asks_json) VALUES(?,?,?,?,?,?,?,?)",
+            (payload["symbol"], payload["provider"], payload["observed_at"], payload["source_timestamp"],
+             int(payload["stale"]), payload["price"], json.dumps(payload["bids"]), json.dumps(payload["asks"]))
+        )
+
+
+def _history_datetime(value: str, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} 不是有效日期时间。") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone(timedelta(hours=8)))
+    return parsed.astimezone(timezone.utc)
 
 
 def _publish_run_progress(progress_id: str | None, stage: str, state: str,
@@ -372,6 +417,12 @@ def market_quote(symbol: str):
                 "stale": is_stale, "freshness": "LIVE" if not is_stale else "STALE_OR_UNVERIFIED",
             }
             _QUOTE_CACHE[symbol] = {"payload": payload, "_cached_epoch": now}
+            try:
+                _save_orderbook_snapshot(payload)
+                payload["orderbook_persisted"] = True
+            except sqlite3.Error as history_exc:
+                payload["orderbook_persisted"] = False
+                payload["orderbook_persistence_warning"] = f"盘口历史未落盘：{type(history_exc).__name__}"
             history = _QUOTE_HISTORY.setdefault(symbol, deque(maxlen=_QUOTE_HISTORY_MAX_SAMPLES))
             source_key = payload["source_timestamp"] or payload["observed_at"]
             if not history or history[-1].get("source_key") != source_key:
@@ -396,6 +447,122 @@ def market_quote(symbol: str):
                         "cache_age_seconds": max(0, int(now - cached["_cached_epoch"])),
                         "refresh_after_seconds": 0, "warning": f"行情源暂不可用：{type(exc).__name__}"}
             raise HTTPException(status_code=502, detail=f"实时行情暂不可用：{type(exc).__name__}: {str(exc)[:220]}") from exc
+
+
+@app.get("/api/market/kline/{symbol}")
+def market_kline(symbol: str, period: str = Query("1d"), start: str = Query(...), end: str = Query(...)):
+    """Serve genuine Eastmoney/AkShare OHLCV bars; never synthesize missing candles."""
+    if len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036":
+        raise HTTPException(status_code=422, detail="仅支持沪深市场 0/3/6 开头的 6 位股票代码。")
+    allowed = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "60m": "60", "1d": "daily", "1w": "weekly", "1mo": "monthly"}
+    if period not in allowed:
+        raise HTTPException(status_code=422, detail="周期仅支持 1/5/15/30/60 分钟、日 K、周 K、月 K。")
+    try:
+        start_dt, end_dt = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        # HTML date inputs submit date-only values. Treat the end date as the
+        # whole local trading day, rather than midnight at its start.
+        if len(end.strip()) == 10:
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="时间范围必须为 ISO 日期或日期时间。") from exc
+    if start_dt > end_dt:
+        raise HTTPException(status_code=422, detail="开始时间不能晚于结束时间。")
+    intraday = period in {"1m", "5m", "15m", "30m", "60m"}
+    max_days = 5 if period == "1m" else 30 if intraday else 3650
+    if (end_dt - start_dt).total_seconds() > max_days * 86400:
+        raise HTTPException(status_code=422, detail=f"{period} 周期单次最多查询 {max_days} 天。")
+    key = f"{symbol}:{period}:{start}:{end}"
+    now = time.time()
+    with _KLINE_LOCK:
+        cached = _KLINE_CACHE.get(key)
+        ttl = 15 if intraday else 300
+        if cached and now - cached["cached_epoch"] < ttl:
+            return {**cached["payload"], "cache_hit": True, "cache_age_seconds": int(now-cached["cached_epoch"])}
+        try:
+            if intraday:
+                start_arg = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+                end_arg = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+                raw = market_provider.ak.stock_zh_a_hist_min_em(
+                    symbol=symbol, start_date=start_arg, end_date=end_arg,
+                    period=allowed[period], adjust="")
+                provider = "AkShare/Eastmoney minute bars"
+                retrieved_at = datetime.now(timezone.utc).isoformat()
+                columns = {"时间": "time", "开盘": "open", "收盘": "close", "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount"}
+                bars_frame = raw.rename(columns=columns).copy()
+                if "time" not in bars_frame or bars_frame.empty:
+                    raise ValueError("分钟线数据源没有返回有效 K 线。")
+                for col in ("volume", "amount"):
+                    if col not in bars_frame:
+                        bars_frame[col] = 0
+                bars_frame["time"] = pd.to_datetime(bars_frame["time"], errors="coerce")
+                for col in ("open", "high", "low", "close", "volume", "amount"):
+                    if col in bars_frame:
+                        bars_frame[col] = pd.to_numeric(bars_frame[col], errors="coerce")
+                bars_frame = bars_frame.dropna(subset=["time", "open", "high", "low", "close"])
+                bars_frame = bars_frame.loc[bars_frame.time.between(start_dt, end_dt)].sort_values("time")
+                bars = [{**{k: (v.isoformat(sep=" ") if k == "time" else (float(v) if pd.notna(v) else 0)) for k,v in row.items()}} for row in bars_frame[[c for c in ("time","open","high","low","close","volume","amount") if c in bars_frame]].to_dict("records")]
+            else:
+                fetch_start, fetch_end = start_dt.date(), end_dt.date()
+                if (fetch_end-fetch_start).days < 40:
+                    fetch_start -= timedelta(days=45)
+                    fetch_end += timedelta(days=1)
+                raw, meta = market_provider.fetch_daily(symbol, fetch_start.isoformat(), fetch_end.isoformat())
+                for col in ("volume", "amount"):
+                    if col not in raw:
+                        raw[col] = 0
+                raw = raw.loc[raw.date.between(pd.Timestamp(start_dt.date()), pd.Timestamp(end_dt.date()))].copy()
+                if period == "1w":
+                    raw["bucket"] = raw.date.dt.to_period("W-FRI")
+                elif period == "1mo":
+                    raw["bucket"] = raw.date.dt.to_period("M")
+                else:
+                    raw["bucket"] = raw.date.dt.to_period("D")
+                grouped = raw.groupby("bucket", sort=True).agg(date=("date","last"),open=("open","first"),high=("high","max"),low=("low","min"),close=("close","last"),volume=("volume","sum"),amount=("amount","sum")).reset_index(drop=True)
+                bars = [{"time":row.date.strftime("%Y-%m-%d"),"open":float(row.open),"high":float(row.high),"low":float(row.low),"close":float(row.close),"volume":float(row.volume or 0),"amount":float(row.amount or 0)} for row in grouped.itertuples()]
+                provider, retrieved_at = meta.get("provider"), meta.get("retrieved_at")
+            if not bars:
+                raise ValueError("所选时间范围没有行情 K 线。")
+            payload = {"symbol":symbol,"period":period,"provider":provider,"retrieved_at":retrieved_at,
+                       "source_timestamp":bars[-1].get("time"),
+                       "bars":bars,"count":len(bars),"stale":False,"data_kind":"upstream_ohlcv",
+                       "notice":"分钟线由东方财富公开行情接口返回，可能存在服务商延迟；现价独立来自腾讯报价源。" if intraday else "周/月线由带来源记录的真实日线 OHLCV 聚合。"}
+            _KLINE_CACHE[key] = {"payload":payload,"cached_epoch":now}
+            return {**payload,"cache_hit":False,"cache_age_seconds":0}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if cached:
+                return {**cached["payload"],"stale":True,"cache_hit":True,"cache_age_seconds":int(now-cached["cached_epoch"]),"warning":f"上游刷新失败，返回缓存：{type(exc).__name__}"}
+            raise HTTPException(status_code=502,detail=f"真实 K 线获取失败：{type(exc).__name__}: {str(exc)[:180]}") from exc
+
+
+@app.get("/api/market/book/{symbol}/history")
+def orderbook_history(symbol: str, start: str = Query(...), end: str = Query(...),
+                      limit: int = Query(500, ge=1, le=2000)):
+    """Query locally captured real top-five snapshots by observation time (China local time if no zone)."""
+    if len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036":
+        raise HTTPException(status_code=422, detail="仅支持沪深市场 0/3/6 开头的 6 位股票代码。")
+    start_dt, end_dt = _history_datetime(start, "start"), _history_datetime(end, "end")
+    if start_dt > end_dt:
+        raise HTTPException(status_code=422, detail="开始时间不能晚于结束时间。")
+    if (end_dt - start_dt).total_seconds() > 31 * 86400:
+        raise HTTPException(status_code=422, detail="单次查询最多覆盖 31 天。")
+    start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+    with _book_history_connection() as conn:
+        earliest = conn.execute("SELECT MIN(observed_at) FROM orderbook_snapshots WHERE symbol=?", (symbol,)).fetchone()[0]
+        rows = conn.execute(
+            "SELECT id, symbol, provider, observed_at, source_timestamp, stale, price, bids_json, asks_json "
+            "FROM orderbook_snapshots WHERE symbol=? AND observed_at>=? AND observed_at<=? "
+            "ORDER BY observed_at ASC LIMIT ?", (symbol, start_iso, end_iso, limit)
+        ).fetchall()
+    snapshots = [{"id": row["id"], "symbol": row["symbol"], "provider": row["provider"],
+                  "observed_at": row["observed_at"], "source_timestamp": row["source_timestamp"],
+                  "stale": bool(row["stale"]), "price": row["price"],
+                  "bids": json.loads(row["bids_json"]), "asks": json.loads(row["asks_json"])} for row in rows]
+    return {"symbol": symbol, "start": start_iso, "end": end_iso, "count": len(snapshots),
+            "limit": limit, "capture_started_at": earliest, "storage": "sqlite_local_observations",
+            "notice": "仅包含本服务启动采集后实际观察到的公开五档快照；不提供采集前的历史盘口。",
+            "snapshots": snapshots}
 
 
 @app.post("/api/audit")

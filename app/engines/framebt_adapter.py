@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import pandas as pd
+import sys
+from pathlib import Path
 
 
 def run_framebt(df: pd.DataFrame, symbol: str, fast: int, slow: int, initial_cash: float,
                 slippage_bps: float, commission_bps: float,
                 target_states: list[int] | None = None) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Run the pinned upstream framebt engine on the exact fetched daily-bar snapshot."""
+    # Codex/local development may keep the approved upstream checkout outside the
+    # active virtualenv. Prefer the normal installed package, but make that local
+    # checkout importable when present; deployed builds install it from requirements.
+    local_vendor = Path(__file__).resolve().parents[2] / ".codex-deps"
+    if local_vendor.is_dir() and str(local_vendor) not in sys.path:
+        sys.path.insert(0, str(local_vendor))
     from framebt import (Engine, Bar, BarFeed, StandardAshareRules, StandardCost,
                          FrameStrategy, Order, OrderSide, OrderType)
     from framebt.strategies import DualMAStrategy

@@ -4,6 +4,8 @@ __pycache__/
 .env
 data/
 /upstream/
+/.codex-deps/
+/.tmp-pip/
 *.sqlite3
 *.parquet
 *.csv
