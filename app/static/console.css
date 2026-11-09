@@ -378,3 +378,12 @@
  .dashboard-canvas>.workbench-widget[data-widget-id="review-panel"],
  .dashboard-canvas>.workbench-widget[data-widget-id="last-audit-panel"]{grid-column:span 6!important}
 }
+
+@media(max-width:1450px) and (min-width:761px){
+ .dashboard-canvas>.workbench-widget[data-widget-id="research-config"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="live-watch"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="daily-diff"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="evidence-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="review-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="last-audit-panel"]{grid-column:span 4!important}
+}
