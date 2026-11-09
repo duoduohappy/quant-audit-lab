@@ -337,6 +337,8 @@
  .workbench-grid>.dashboard-canvas{--dashboard-columns:8;grid-template-columns:repeat(8,minmax(0,1fr))!important}
  .dashboard-canvas>.workbench-widget[data-widget-id="live-market"] .quote-desk{grid-template-columns:minmax(0,1fr)!important}
 }
+@media(min-width:761px){.workbench-grid>.dashboard-canvas{grid-auto-rows:8px}}
+@media(max-width:760px){.workbench-grid>.dashboard-canvas{grid-auto-rows:auto}}
 @media(max-width:760px){
  .shell{padding:10px 10px 24px}
  .top,.workbench-title,.hero{align-items:flex-start;gap:8px;flex-direction:column}
