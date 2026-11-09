@@ -22,6 +22,7 @@ import pandas as pd
 from app.audit import run_audit
 from app.providers import akshare_provider as market_provider
 from app.research_loop import (ENTRY_SCORE_THRESHOLD, latest_results, paper_action,
+                               record_research_event,
                                paper_state, save_scan_failure, save_scan_result,
                                score_daily_bars)
 
@@ -292,6 +293,7 @@ class FactorReplayRequest(AuditRequest):
 
 class ResearchScanRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=10)
+    batch_id: UUID | None = None
 
     @field_validator("symbols")
     @classmethod
@@ -622,19 +624,37 @@ def orderbook_history(symbol: str, start: str = Query(...), end: str = Query(...
 @app.post("/api/research/scan")
 def research_scan(request: ResearchScanRequest):
     """Score at most ten user-selected symbols from real daily bars; no price synthesis."""
-    batch_id = str(uuid4())
+    batch_id = str(request.batch_id or uuid4())
     end = date.today() - timedelta(days=1)  # Exclude today's potentially incomplete candle.
     start = end - timedelta(days=120)
     results, failures = [], []
+    record_research_event("SCAN_STARTED", None, {"batch_id": batch_id, "symbols": request.symbols,
+                          "requested": len(request.symbols), "provider": "AkShare",
+                          "range_start": start.isoformat(), "range_end": end.isoformat(),
+                          "execution": "research_only"})
     for symbol in request.symbols:
+        source = {}
         try:
             bars, source = market_provider.fetch_daily(symbol, start.isoformat(), end.isoformat())
-            result = score_daily_bars(symbol, bars, source)
+            latest_bar_date = pd.Timestamp(bars["date"].max()).date()
+            age_days = (date.today() - latest_bar_date).days
+            cache_stale = str(source.get("cache_status", "")).startswith("stale")
+            availability = "fresh" if not cache_stale and 0 <= age_days <= 7 else "stale"
+            event_source = {**source, "availability": availability,
+                            "bar_date": latest_bar_date.isoformat(), "age_days": age_days}
+            record_research_event("MARKET_DATA_RECEIVED", symbol,
+                                  {"batch_id": batch_id, "source": event_source,
+                                   "rows": len(bars), "availability": availability})
+            result = score_daily_bars(
+                symbol, bars, source,
+                progress=lambda event_type, details, symbol=symbol:
+                    record_research_event(event_type, symbol,
+                                          {"batch_id": batch_id, "source": source, **details}))
             result["batch_id"] = batch_id
             results.append(save_scan_result(result))
         except Exception as exc:
             reason = f"{type(exc).__name__}: {str(exc)[:180]}"
-            save_scan_failure(symbol, reason)
+            save_scan_failure(symbol, reason, batch_id=batch_id, source=source)
             failures.append({"symbol": symbol, "status": "unavailable", "reason": reason})
     return {"batch_id": batch_id, "requested": len(request.symbols),
             "succeeded": len(results), "failed": len(failures),
@@ -650,9 +670,11 @@ def research_latest():
 
 
 @app.get("/api/research/events")
-def research_events(limit: int = Query(100, ge=1, le=500)):
+def research_events(limit: int = Query(100, ge=1, le=500),
+                    batch_id: UUID | None = None,
+                    after: int = Query(0, ge=0)):
     from app.research_loop import recent_events
-    return recent_events(limit)
+    return recent_events(limit, str(batch_id) if batch_id else None, after)
 
 
 @app.get("/api/paper/state")
@@ -757,5 +779,3 @@ def record_decision(run_id: UUID, decision: ReviewDecision):
     temp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(artifact)
     return {"run_id": str(run_id), "human_review": record["human_review"], "artifact_file": record["artifact_file"]}
-
-

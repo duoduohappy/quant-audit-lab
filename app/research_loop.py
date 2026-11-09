@@ -79,7 +79,22 @@ def _append_event(conn: sqlite3.Connection, event_type: str, symbol: str | None,
             "event_hash": event_hash}
 
 
-def score_daily_bars(symbol: str, frame: pd.DataFrame, source: dict) -> dict:
+def record_research_event(event_type: str, symbol: str | None, payload: dict) -> dict:
+    """Append a real research-stage event to the tamper-evident chain."""
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        event = _append_event(conn, event_type, symbol, payload)
+        conn.commit()
+        return event
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def score_daily_bars(symbol: str, frame: pd.DataFrame, source: dict, progress=None) -> dict:
     """Calculate a transparent 0-100 research score and a separate data/risk gate."""
     required = {"date", "open", "high", "low", "close", "volume"}
     missing = required - set(frame.columns)
@@ -109,6 +124,20 @@ def score_daily_bars(symbol: str, frame: pd.DataFrame, source: dict) -> dict:
     volume_ratio = float(volume.tail(5).mean() / prev_volume) if prev_volume > 0 else None
     recent_high = float(close.tail(20).max())
     drawdown20 = float(last_close / recent_high - 1) if recent_high else 0.0
+    latest_date = pd.Timestamp(data["date"].iloc[-1]).date().isoformat()
+    features = {"bar_date": latest_date, "rows": int(len(data)),
+                "return_5d": round(ret5, 6), "return_20d": round(ret20, 6),
+                "ma5": round(ma5, 4), "ma20": round(ma20, 4),
+                "annualized_volatility_20d": round(vol20, 6),
+                "volume_ratio_5d_to_prev20d": round(volume_ratio, 4) if volume_ratio is not None else None,
+                "drawdown_from_20d_high": round(drawdown20, 6)}
+    age_days = (datetime.now().date() - pd.Timestamp(latest_date).date()).days
+    stale = str(source.get("cache_status", "")).startswith("stale")
+    score_available = not stale and 0 <= age_days <= 7
+    event_source = {**source, "availability": "fresh" if score_available else "stale",
+                    "bar_date": latest_date, "age_days": age_days}
+    if progress:
+        progress("FEATURES_GENERATED", {"features": features, "source": event_source})
     components = {
         "trend_vs_ma20": 25.0 if last_close > ma20 else 0.0,
         "short_trend": 15.0 if ma5 > ma20 else 0.0,
@@ -118,9 +147,7 @@ def score_daily_bars(symbol: str, frame: pd.DataFrame, source: dict) -> dict:
         "drawdown_quality": 10.0 if drawdown20 >= -0.08 else 5.0 if drawdown20 >= -0.15 else 0.0,
     }
     score = round(sum(components.values()), 2)
-    latest_date = pd.Timestamp(data["date"].iloc[-1]).date().isoformat()
-    age_days = (datetime.now().date() - pd.Timestamp(latest_date).date()).days
-    stale = str(source.get("cache_status", "")).startswith("stale")
+    rounded_components = {key: round(value, 2) for key, value in components.items()}
     risk_reasons = []
     if last_close <= 0 or not math.isfinite(last_close):
         risk_reasons.append("收盘价无效")
@@ -134,23 +161,50 @@ def score_daily_bars(symbol: str, frame: pd.DataFrame, source: dict) -> dict:
         risk_reasons.append("年化波动率超过 80% 或不可计算")
     if float(volume.iloc[-1]) <= 0:
         risk_reasons.append("最新日成交量无效")
+    if progress:
+        if score_available:
+            progress("SCORE_COMPUTED", {"score": score, "score_threshold": ENTRY_SCORE_THRESHOLD,
+                                        "score_components": rounded_components})
+        else:
+            progress("SCORE_SKIPPED", {"reason": "行情缓存过期或最新日线超过 7 天/日期异常；不输出评分",
+                                       "availability": "stale", "bar_date": latest_date,
+                                       "age_days": age_days})
+        progress("RISK_GATE_DECIDED", {"risk_gate": "ALLOW" if not risk_reasons else "BLOCK",
+                                       "risk_reasons": risk_reasons,
+                                       "rules": {"max_bar_age_days": 7, "max_annualized_volatility": 0.80,
+                                                 "require_positive_close": True,
+                                                 "require_positive_latest_volume": True,
+                                                 "reject_stale_cache": True}})
     return {
-        "symbol": symbol, "price": round(last_close, 4), "score": score,
+        "symbol": symbol, "price": round(last_close, 4) if score_available else None,
+        "score": score if score_available else None,
         "score_threshold": ENTRY_SCORE_THRESHOLD,
-        "score_components": {key: round(value, 2) for key, value in components.items()},
-        "features": {"bar_date": latest_date, "rows": int(len(data)),
-                     "return_5d": round(ret5, 6), "return_20d": round(ret20, 6),
-                     "ma5": round(ma5, 4), "ma20": round(ma20, 4),
-                     "annualized_volatility_20d": round(vol20, 6),
-                     "volume_ratio_5d_to_prev20d": round(volume_ratio, 4) if volume_ratio is not None else None,
-                     "drawdown_from_20d_high": round(drawdown20, 6)},
+        "score_components": rounded_components if score_available else {},
+        "features": features,
         "risk_gate": "ALLOW" if not risk_reasons else "BLOCK",
         "risk_reasons": risk_reasons,
         "data": {"provider": source.get("provider"), "retrieved_at": source.get("retrieved_at"),
                  "cache_status": source.get("cache_status"), "snapshot_sha256": source.get("snapshot_sha256"),
-                 "snapshot_file": source.get("snapshot_file")},
+                 "snapshot_file": source.get("snapshot_file"),
+                 "availability": "fresh" if score_available else "stale",
+                 "bar_date": latest_date, "age_days": age_days},
         "paper_state": "FLAT",
     }
+
+
+def _scan_data_unavailable(scan: dict) -> bool:
+    data = scan.get("data") or {}
+    cache_status = str(data.get("cache_status") or "")
+    if cache_status.startswith("stale") or cache_status == "unavailable" or data.get("availability") in {"stale", "unavailable"}:
+        return True
+    bar_date = data.get("bar_date") or (scan.get("features") or {}).get("bar_date")
+    if bar_date:
+        try:
+            age_days = (datetime.now().date() - pd.Timestamp(bar_date).date()).days
+        except Exception:
+            return True
+        return age_days < 0 or age_days > 7
+    return False
 
 
 def save_scan_result(result: dict) -> dict:
@@ -159,7 +213,17 @@ def save_scan_result(result: dict) -> dict:
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _append_event(conn, "WATCHLIST_SCAN_SCORED", result["symbol"], result)
+        position = conn.execute("SELECT symbol,quantity,avg_price,opened_at FROM paper_positions WHERE symbol=?",
+                                (result["symbol"],)).fetchone()
+        result["paper_state"] = ("PAPER_OPEN" if position else
+                                 "RISK_BLOCKED" if result["risk_gate"] == "BLOCK" else
+                                 "CANDIDATE" if result.get("score") is not None and
+                                 float(result["score"]) >= ENTRY_SCORE_THRESHOLD else "FLAT")
+        result["paper_position"] = dict(position) if position else None
+        event = _append_event(conn, "SCAN_AUDIT_PERSISTED", result["symbol"],
+                              {**result, "source": result.get("data"), "audit_id": result["scan_id"]})
+        result["audit_event_id"] = event["event_id"]
+        result["audit_hash"] = event["event_hash"]
         conn.execute("INSERT INTO research_latest(symbol,scan_id,scanned_at,payload_json) VALUES(?,?,?,?) "
                       "ON CONFLICT(symbol) DO UPDATE SET scan_id=excluded.scan_id,scanned_at=excluded.scanned_at,payload_json=excluded.payload_json",
                       (result["symbol"], scan_id, result["scanned_at"], _canonical(result)))
@@ -172,7 +236,8 @@ def save_scan_result(result: dict) -> dict:
         conn.close()
 
 
-def save_scan_failure(symbol: str, message: str) -> dict:
+def save_scan_failure(symbol: str, message: str, batch_id: str | None = None,
+                      source: dict | None = None) -> dict:
     now, scan_id = datetime.now(timezone.utc).isoformat(), str(uuid4())
     reason = message[:240]
     blocked_result = {"symbol": symbol, "scan_id": scan_id, "scanned_at": now,
@@ -181,12 +246,18 @@ def save_scan_failure(symbol: str, message: str) -> dict:
                       "risk_reasons": [reason], "data": {"provider": None, "retrieved_at": None,
                                                             "cache_status": "unavailable", "snapshot_sha256": None,
                                                             "snapshot_file": None},
-                      "paper_state": "RISK_BLOCKED", "execution": "real_data_only"}
-    event = {"reason": reason, "execution": "real_data_only"}
+                      "paper_state": "RISK_BLOCKED", "execution": "real_data_only",
+                      "batch_id": batch_id}
+    blocked_result["data"].update(source or {})
+    blocked_result["data"]["availability"] = "unavailable"
+    event = {"reason": reason, "execution": "real_data_only", "batch_id": batch_id,
+             "source": blocked_result["data"], "availability": "unavailable"}
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         saved = _append_event(conn, "WATCHLIST_SCAN_FAILED", symbol, {**event, **blocked_result})
+        blocked_result["audit_event_id"] = saved["event_id"]
+        blocked_result["audit_hash"] = saved["event_hash"]
         conn.execute("INSERT INTO research_latest(symbol,scan_id,scanned_at,payload_json) VALUES(?,?,?,?) "
                      "ON CONFLICT(symbol) DO UPDATE SET scan_id=excluded.scan_id,scanned_at=excluded.scanned_at,payload_json=excluded.payload_json",
                      (symbol, scan_id, now, _canonical(blocked_result)))
@@ -208,8 +279,17 @@ def latest_results() -> list[dict]:
         conn.close()
     results = [json.loads(row[0]) for row in rows]
     for item in results:
+        if _scan_data_unavailable(item):
+            item.setdefault("data", {})["availability"] = "stale"
+            item["price"] = None
+            item["score"] = None
+            item["score_components"] = {}
+            item["risk_gate"] = "BLOCK"
+            reasons = item.setdefault("risk_reasons", [])
+            if "行情过期或不可用" not in reasons:
+                reasons.append("行情过期或不可用；评分与纸面动作已禁用")
         pos = positions.get(item["symbol"])
-        item["paper_state"] = "PAPER_OPEN" if pos else ("RISK_BLOCKED" if item["risk_gate"] == "BLOCK" else "CANDIDATE" if item["score"] >= ENTRY_SCORE_THRESHOLD else "FLAT")
+        item["paper_state"] = "PAPER_OPEN" if pos else ("RISK_BLOCKED" if item["risk_gate"] == "BLOCK" else "CANDIDATE" if item.get("score") is not None and item["score"] >= ENTRY_SCORE_THRESHOLD else "FLAT")
         item["paper_position"] = dict(pos) if pos else None
     return results
 
@@ -230,6 +310,8 @@ def paper_action(symbol: str, action: str, quantity: int | None = None) -> dict:
         if action == "open":
             if position:
                 raise ValueError("该标的已有纸面持仓")
+            if _scan_data_unavailable(scan):
+                raise ValueError("最新行情过期或不可用；不能创建纸面持仓")
             if scan["risk_gate"] != "ALLOW":
                 raise ValueError("独立风控门禁阻断，不能创建纸面持仓")
             if scan.get("score") is None or float(scan["score"]) < ENTRY_SCORE_THRESHOLD:
@@ -254,12 +336,15 @@ def paper_action(symbol: str, action: str, quantity: int | None = None) -> dict:
             event = _append_event(conn, "PAPER_POSITION_OPENED", symbol,
                                   {"scan_id": scan["scan_id"], "quantity": quantity, "price": price,
                                    "notional": round(notional, 4), "risk_gate": scan["risk_gate"],
-                                   "score": scan["score"], "execution": "paper_only"})
+                                   "score": scan["score"], "source": scan.get("data"),
+                                   "bar_date": scan.get("features", {}).get("bar_date"),
+                                   "retrieved_at": scan.get("data", {}).get("retrieved_at"),
+                                   "snapshot_sha256": scan.get("data", {}).get("snapshot_sha256"),
+                                   "execution": "paper_only"})
         else:
             if not position:
                 raise ValueError("该标的没有可平仓的纸面持仓")
-            cache_status = str(scan.get("data", {}).get("cache_status") or "")
-            if cache_status.startswith("stale") or cache_status == "unavailable":
+            if _scan_data_unavailable(scan):
                 raise ValueError("最新行情来自过期缓存或不可用；不能用该价格平仓")
             if scan.get("price") is None or not math.isfinite(float(scan["price"])) or float(scan["price"]) <= 0:
                 raise ValueError("最新真实行情不可用；不能用模拟价格平仓")
@@ -272,7 +357,11 @@ def paper_action(symbol: str, action: str, quantity: int | None = None) -> dict:
             conn.execute("DELETE FROM paper_positions WHERE symbol=?", (symbol,))
             event = _append_event(conn, "PAPER_POSITION_CLOSED", symbol,
                                   {"scan_id": scan["scan_id"], "quantity": qty, "price": price,
-                                   "realized_pnl": round(realized, 4), "execution": "paper_only"})
+                                   "realized_pnl": round(realized, 4), "source": scan.get("data"),
+                                   "bar_date": scan.get("features", {}).get("bar_date"),
+                                   "retrieved_at": scan.get("data", {}).get("retrieved_at"),
+                                   "snapshot_sha256": scan.get("data", {}).get("snapshot_sha256"),
+                                   "execution": "paper_only"})
         conn.commit()
         return {"status": "paper_only", "action": action, "event": event,
                 "state": paper_state()}
@@ -292,9 +381,8 @@ def paper_state() -> dict:
         all_events = conn.execute("SELECT event_id,event_type,symbol,event_time,payload_json,previous_hash,event_hash FROM research_events ORDER BY id").fetchall()
     finally:
         conn.close()
-    latest_prices = {item["symbol"]: (None if str(item.get("data", {}).get("cache_status") or "").startswith("stale")
-                                       or item.get("data", {}).get("cache_status") == "unavailable"
-                                       else item.get("price")) for item in latest_results()}
+    latest_prices = {item["symbol"]: (None if _scan_data_unavailable(item) else item.get("price"))
+                     for item in latest_results()}
     previous_hash = "0" * 64
     chain_valid = True
     for row in all_events:
@@ -331,18 +419,25 @@ def paper_state() -> dict:
                             "head_hash": previous_hash}}
 
 
-def recent_events(limit: int = 100) -> dict:
+def recent_events(limit: int = 100, batch_id: str | None = None, after: int = 0) -> dict:
     conn = _connect()
     try:
-        rows = conn.execute("SELECT event_id,event_type,symbol,event_time,payload_json,previous_hash,event_hash "
-                            "FROM research_events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        if batch_id:
+            rows = conn.execute("SELECT id,event_id,event_type,symbol,event_time,payload_json,previous_hash,event_hash "
+                                "FROM research_events WHERE id>? AND payload_json LIKE ? "
+                                "ORDER BY id ASC LIMIT ?", (after, f'%"batch_id":"{batch_id}"%', limit)).fetchall()
+        else:
+            rows = conn.execute("SELECT id,event_id,event_type,symbol,event_time,payload_json,previous_hash,event_hash "
+                                "FROM research_events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     finally:
         conn.close()
-    events = [{"event_id": row["event_id"], "event_type": row["event_type"],
+    all_events = [{"cursor": row["id"], "event_id": row["event_id"], "event_type": row["event_type"],
                "symbol": row["symbol"], "event_time": row["event_time"],
                "payload": json.loads(row["payload_json"]),
                "previous_hash": row["previous_hash"], "event_hash": row["event_hash"]}
               for row in rows]
+    events = [event for event in all_events
+              if batch_id is None or event["payload"].get("batch_id") == batch_id]
     return {"events": events, "count": len(events),
+            "cursor": max((event["cursor"] for event in all_events), default=after),
             "audit_chain": paper_state()["audit_chain"]}
-
