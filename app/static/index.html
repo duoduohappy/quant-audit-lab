@@ -132,7 +132,7 @@
  function queueSideNavSync(){if(navSyncPending)return;navSyncPending=true;requestAnimationFrame(syncSideNav)}
  window.addEventListener('scroll',queueSideNavSync,{passive:true});window.addEventListener('resize',queueSideNavSync);navLinks.forEach(link=>link.addEventListener('click',()=>requestAnimationFrame(queueSideNavSync)));requestAnimationFrame(queueSideNavSync);
  const run=$('run');if(run)run.textContent='▶ 运行回测与审计';
- const storageKey='quant-audit-lab.dashboard-layout.v5',resetButton=$('layoutReset'),layoutStatus=$('layoutStatus');let saved={};try{saved=JSON.parse(localStorage.getItem(storageKey)||'{}')}catch{}
+ const storageKey='quant-audit-lab.dashboard-layout.v6',resetButton=$('layoutReset'),layoutStatus=$('layoutStatus');let saved={};try{saved=JSON.parse(localStorage.getItem(storageKey)||'{}')}catch{}
  function columns(){return Math.max(1,Number(getComputedStyle(canvas).getPropertyValue('--dashboard-columns').trim())||12)}
  function currentSpan(widget){return Math.max(1,Math.min(columns(),Number(widget.dataset.span)||defaults[widget.dataset.widgetId].span))}
  function persist(){const state={version:1,order:[...canvas.children].map(el=>el.dataset.widgetId),widgets:{}};canvas.querySelectorAll('.workbench-widget').forEach(el=>{state.widgets[el.dataset.widgetId]={ratio:Number(el.dataset.ratio)||defaults[el.dataset.widgetId].span/12}});saved=state;localStorage.setItem(storageKey,JSON.stringify(state));layoutStatus.textContent='布局已保存'}
