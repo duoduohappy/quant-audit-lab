@@ -138,7 +138,20 @@
  function persist(){const state={version:1,order:[...canvas.children].map(el=>el.dataset.widgetId),widgets:{}};canvas.querySelectorAll('.workbench-widget').forEach(el=>{state.widgets[el.dataset.widgetId]={ratio:Number(el.dataset.ratio)||defaults[el.dataset.widgetId].span/12}});saved=state;localStorage.setItem(storageKey,JSON.stringify(state));layoutStatus.textContent='布局已保存'}
  function applySaved(){const state=saved&&saved.version===1?saved:null;if(state?.order)state.order.forEach(id=>{const el=canvas.querySelector(`[data-widget-id="${id}"]`);if(el)canvas.append(el)});canvas.querySelectorAll('.workbench-widget').forEach(el=>{const id=el.dataset.widgetId,config=state?.widgets?.[id],ratio=Number(config?.ratio)||defaults[id].span/12,span=Math.max(1,Math.min(columns(),Math.round(ratio*columns())));el.dataset.ratio=String(ratio);el.dataset.span=String(span);el.style.gridColumn=`span ${span}`;el.style.minHeight=''});}
  function applyResponsiveSpans(){const count=columns();canvas.querySelectorAll('.workbench-widget').forEach(el=>{const ratio=Number(el.dataset.ratio)||defaults[el.dataset.widgetId].span/12,span=Math.max(1,Math.min(count,Math.round(ratio*count)));el.dataset.span=String(span);el.style.gridColumn=`span ${span}`})}
- applySaved();
+ function compactDashboardRows(){
+  const widgets=[...canvas.querySelectorAll('.workbench-widget')],singleColumn=matchMedia('(max-width:760px)').matches;
+  if(singleColumn){canvas.style.gridAutoRows='auto';widgets.forEach(el=>{el.style.gridRowEnd=''});return}
+  const rowHeight=8;canvas.style.gridAutoRows=`${rowHeight}px`;
+  widgets.forEach(el=>{el.style.gridRowEnd='auto'});
+  const gap=parseFloat(getComputedStyle(canvas).rowGap)||12;
+  const heights=widgets.map(el=>Math.max(el.scrollHeight,Math.ceil(el.getBoundingClientRect().height)));
+  widgets.forEach((el,i)=>{const span=Math.max(1,Math.ceil((heights[i]+gap)/(rowHeight+gap)));if(el.style.gridRowEnd!==`span ${span}`)el.style.gridRowEnd=`span ${span}`});
+ }
+ let compactFrame=0;function scheduleCompactDashboard(){if(compactFrame)return;compactFrame=requestAnimationFrame(()=>{compactFrame=0;compactDashboardRows()})}
+ applySaved();scheduleCompactDashboard();
+ const compactResizeObserver=new ResizeObserver(scheduleCompactDashboard);canvas.querySelectorAll('.workbench-widget').forEach(el=>compactResizeObserver.observe(el));
+ const compactMutationObserver=new MutationObserver(scheduleCompactDashboard);canvas.querySelectorAll('.workbench-widget').forEach(el=>compactMutationObserver.observe(el,{childList:true,characterData:true,subtree:true}));
+
  resetButton.addEventListener('click',()=>{localStorage.removeItem(storageKey);saved={};ids.forEach(id=>{const el=canvas.querySelector(`[data-widget-id="${id}"]`);if(el)canvas.append(el)});canvas.querySelectorAll('.workbench-widget').forEach(el=>{el.style.minHeight='';el.dataset.ratio=String(defaults[el.dataset.widgetId].span/12)});applyResponsiveSpans();persist();layoutStatus.textContent='已恢复默认布局'});
  let dragged=null,dragPointer=null,dragMoved=false,dragStart=null;
  canvas.addEventListener('pointerdown',event=>{
