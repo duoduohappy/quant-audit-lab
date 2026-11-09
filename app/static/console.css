@@ -304,7 +304,7 @@
 .shell{width:min(100%,3200px);max-width:none;padding:clamp(12px,1.25vw,28px) clamp(12px,1.5vw,32px) 44px}
 .workbench-grid{grid-template-columns:clamp(112px,7.2vw,148px) minmax(0,1fr)!important;gap:clamp(10px,.8vw,16px)!important}
 .workbench-grid>.side-nav{top:14px!important;max-height:calc(100vh - 28px);padding:10px 8px!important}
-.workbench-grid>.dashboard-canvas{gap:clamp(8px,.65vw,14px)!important;align-content:start!important;grid-auto-flow:row dense!important}
+.workbench-grid>.dashboard-canvas{gap:clamp(8px,.65vw,14px)!important;align-content:start!important;grid-auto-flow:row!important;grid-auto-rows:auto!important}
 .dashboard-canvas>.workbench-widget{min-height:0!important;overflow-wrap:anywhere}
 .dashboard-canvas>.workbench-widget[data-widget-id="research-config"]>.controls{position:static!important;top:auto!important;max-height:none!important;overflow:visible!important}
 .dashboard-canvas>.workbench-widget[data-widget-id="research-config"]{align-self:start}
@@ -337,8 +337,6 @@
  .workbench-grid>.dashboard-canvas{--dashboard-columns:8;grid-template-columns:repeat(8,minmax(0,1fr))!important}
  .dashboard-canvas>.workbench-widget[data-widget-id="live-market"] .quote-desk{grid-template-columns:minmax(0,1fr)!important}
 }
-@media(min-width:761px){.workbench-grid>.dashboard-canvas{grid-auto-rows:8px}}
-@media(max-width:760px){.workbench-grid>.dashboard-canvas{grid-auto-rows:auto}}
 @media(max-width:760px){
  .shell{padding:10px 10px 24px}
  .top,.workbench-title,.hero{align-items:flex-start;gap:8px;flex-direction:column}
@@ -358,3 +356,25 @@
 }
 
 
+
+/* Stable dashboard rows: related cards share a line; long-form panels use full width. */
+@media(min-width:761px){
+ .dashboard-canvas>.workbench-widget[data-widget-id="research-config"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="live-watch"]{grid-column:span 6!important}
+ .dashboard-canvas>.workbench-widget[data-widget-id="run-strip"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="research-status"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="research-loop"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="live-market"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="gate-kpis"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="headline-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="backtest-plot-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="source-card"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="performance"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="fills-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="ops-summary"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="kline-desk"]{grid-column:1/-1!important}
+ .dashboard-canvas>.workbench-widget[data-widget-id="daily-diff"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="evidence-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="review-panel"],
+ .dashboard-canvas>.workbench-widget[data-widget-id="last-audit-panel"]{grid-column:span 6!important}
+}
