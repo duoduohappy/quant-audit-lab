@@ -152,7 +152,7 @@
  const compactResizeObserver=new ResizeObserver(scheduleCompactDashboard);canvas.querySelectorAll('.workbench-widget').forEach(el=>compactResizeObserver.observe(el));
  const compactMutationObserver=new MutationObserver(scheduleCompactDashboard);canvas.querySelectorAll('.workbench-widget').forEach(el=>compactMutationObserver.observe(el,{childList:true,characterData:true,subtree:true}));
 
- resetButton.addEventListener('click',()=>{localStorage.removeItem(storageKey);saved={};ids.forEach(id=>{const el=canvas.querySelector(`[data-widget-id="${id}"]`);if(el)canvas.append(el)});canvas.querySelectorAll('.workbench-widget').forEach(el=>{el.style.minHeight='';el.dataset.ratio=String(defaults[el.dataset.widgetId].span/12)});applyResponsiveSpans();persist();layoutStatus.textContent='已恢复默认布局'});
+ resetButton.addEventListener('click',()=>{localStorage.removeItem(storageKey);saved={};ids.forEach(id=>{const el=canvas.querySelector(`[data-widget-id="${id}"]`);if(el)canvas.append(el)});canvas.querySelectorAll('.workbench-widget').forEach(el=>{el.style.minHeight='';el.dataset.ratio=String(defaults[el.dataset.widgetId].span/12)});applyResponsiveSpans();persist();scheduleCompactDashboard();layoutStatus.textContent='已恢复默认布局'});
  let dragged=null,dragPointer=null,dragMoved=false,dragStart=null;
  canvas.addEventListener('pointerdown',event=>{
   const widget=event.target.closest('.workbench-widget');if(!widget||event.target.closest('button,a,input,select,textarea,summary,label,[contenteditable="true"]'))return;
