@@ -10,7 +10,7 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -21,6 +21,9 @@ import pandas as pd
 
 from app.audit import run_audit
 from app.providers import akshare_provider as market_provider
+from app.research_loop import (ENTRY_SCORE_THRESHOLD, latest_results, paper_action,
+                               paper_state, save_scan_failure, save_scan_result,
+                               score_daily_bars)
 
 ROOT = Path(__file__).parent
 load_dotenv(ROOT.parent / ".env")
@@ -285,6 +288,31 @@ class FactorReplayRequest(AuditRequest):
         if any(not math.isfinite(row.score) for row in rows):
             raise ValueError("因子分数必须是有限数值。")
         return rows
+
+
+class ResearchScanRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=10)
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_watchlist_symbols(cls, values):
+        symbols = [str(value).strip() for value in values]
+        if any(len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036" for symbol in symbols):
+            raise ValueError("自选池仅支持沪深市场 0/3/6 开头的 6 位股票代码")
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("自选池代码不能重复")
+        return symbols
+
+
+class PaperTransitionRequest(BaseModel):
+    quantity: int | None = Field(None, ge=100, le=1_000_000)
+
+    @field_validator("quantity")
+    @classmethod
+    def validate_lot_quantity(cls, value):
+        if value is not None and value % 100:
+            raise ValueError("纸面数量必须是 100 股的整数倍")
+        return value
 
 
 @app.get("/")
@@ -589,6 +617,57 @@ def orderbook_history(symbol: str, start: str = Query(...), end: str = Query(...
             "limit": limit, "capture_started_at": earliest, "storage": "sqlite_local_observations",
             "notice": "仅包含本服务启动采集后实际观察到的公开五档快照；不提供采集前的历史盘口。",
             "snapshots": snapshots}
+
+
+@app.post("/api/research/scan")
+def research_scan(request: ResearchScanRequest):
+    """Score at most ten user-selected symbols from real daily bars; no price synthesis."""
+    batch_id = str(uuid4())
+    end = date.today() - timedelta(days=1)  # Exclude today's potentially incomplete candle.
+    start = end - timedelta(days=120)
+    results, failures = [], []
+    for symbol in request.symbols:
+        try:
+            bars, source = market_provider.fetch_daily(symbol, start.isoformat(), end.isoformat())
+            result = score_daily_bars(symbol, bars, source)
+            result["batch_id"] = batch_id
+            results.append(save_scan_result(result))
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {str(exc)[:180]}"
+            save_scan_failure(symbol, reason)
+            failures.append({"symbol": symbol, "status": "unavailable", "reason": reason})
+    return {"batch_id": batch_id, "requested": len(request.symbols),
+            "succeeded": len(results), "failed": len(failures),
+            "score_threshold": ENTRY_SCORE_THRESHOLD, "results": results,
+            "failures": failures, "execution": "research_only",
+            "notice": "只扫描用户选择的少量标的；评分来自真实日线确定性特征，不构成投资建议或全市场覆盖。"}
+
+
+@app.get("/api/research/latest")
+def research_latest():
+    results = latest_results()
+    return {"results": results, "count": len(results), "execution": "research_only"}
+
+
+@app.get("/api/research/events")
+def research_events(limit: int = Query(100, ge=1, le=500)):
+    from app.research_loop import recent_events
+    return recent_events(limit)
+
+
+@app.get("/api/paper/state")
+def get_paper_state():
+    return paper_state()
+
+
+@app.post("/api/paper/{symbol}/{action}")
+def transition_paper_position(symbol: str, action: Literal["open", "close"], request: PaperTransitionRequest):
+    if len(symbol) != 6 or not symbol.isdigit() or symbol[0] not in "036":
+        raise HTTPException(status_code=422, detail="仅支持沪深市场 0/3/6 开头的 6 位股票代码。")
+    try:
+        return paper_action(symbol, action, request.quantity)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/audit")
