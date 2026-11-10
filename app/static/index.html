@@ -333,7 +333,7 @@ function spiderDockTag(row){
 
 function spiderDockValue(row){
  if(row.kind==='kline'&&row.feature?.value!=null)return String(row.feature.value);
- const t=String(row.text||''),tag=String(row.tag||'').toUpperCase();
+ const t=String(row.text||''),tag=String(row.tag||spiderDockTag(row)||'').toUpperCase();
  const num='([-+]?\\d[\\d,]*(?:\\.\\d+)?%?(?:元|万|亿|分)?)';
  const contextual={SCORE:new RegExp('(?:评分|score)(?:[^\\d-]{0,12})'+num,'i'),CHANGE:new RegExp('(?:涨跌(?:幅)?|change)(?:[^\\d-]{0,12})'+num,'i'),TURNOVER:new RegExp('(?:成交额|turnover)(?:[^\\d-]{0,12})'+num,'i'),AVG:new RegExp('(?:均价|average)(?:[^\\d-]{0,12})'+num,'i'),OPEN:new RegExp('(?:今开|开盘|open)(?:[^\\d-]{0,12})'+num,'i'),HIGH:new RegExp('(?:最高|high)(?:[^\\d-]{0,12})'+num,'i'),LOW:new RegExp('(?:最低|low)(?:[^\\d-]{0,12})'+num,'i'),CLOSE:new RegExp('(?:收盘|close)(?:[^\\d-]{0,12})'+num,'i'),VOL:new RegExp('(?:成交量|volume|vol)(?:[^\\d-]{0,12})'+num,'i')};
  const match=contextual[tag]?.exec(t);if(match)return match[1];
@@ -345,37 +345,42 @@ function spiderDockValue(row){
 function spiderDockPosition(d,now){const elapsed=(now-d.startedAt)/1000,g=Math.max(0,Math.min(1,(elapsed-.06)/.62)),ease=1-Math.pow(1-g,3),width=d.fullWidth*ease,release=d.releasingAt==null?1:Math.max(0,1-(now-d.releasingAt)/110);return{x:Math.min(d.x1,d.x0+width),y:d.y,width,progress:ease,alpha:(elapsed<1.55?1:Math.max(0,1-(elapsed-1.55)/.30))*release}}
 function updateSpiderDocks(hub,now,flying){
  spider.docks=spider.docks||[];
- if(flying||spider.moving){if(spider.docks.length)for(const d of spider.docks)if(d.releasingAt==null)d.releasingAt=now;return}
+ if(flying||spider.moving){for(const d of spider.docks)if(d.releasingAt==null)d.releasingAt=now;return}
  spider.docks=spider.docks.filter(d=>now<(d.releasingAt==null?d.expiresAt:d.releasingAt+110)&&(!d.el||d.el.isConnected));
- if(spider.dockRefreshRequested||now-(spider.dockScanAt||0)>.34*1000){
+ if(spider.dockRefreshRequested||now-(spider.dockScanAt||0)>340){
   spider.dockRefreshRequested=false;spider.dockScanAt=now;
-  const rows=spiderDockRows(),usedLegs=new Set(spider.docks.map(d=>d.legIndex)),usedRows=new Set(spider.docks.map(d=>d.key));
-  const capture=spider.pendingKlineCapture;
-  if(capture&&capture.key!==spider.lastWbCaptureKey){
-   const p=capture.target,legIndex=capture.legIndex%SPIDER_LEGS;
-   if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&!usedLegs.has(legIndex)){
-    const row={kind:'kline',tag:capture.label||capture.feature,text:`${capture.time||'K线'} · ${capture.label||capture.feature} · ${capture.value??''}`,key:capture.key};
-    spider.docks.push({legIndex,row,el:null,key:row.key,text:row.text,kind:'kline',x0:p.x-22,x1:p.x+22,y:p.y,fullWidth:42,value:String(capture.value??''),tag:spiderDockTag(row),tagAngle:(spiderNoise(legIndex+1)-.5)*.45,tagDy:(spiderNoise(legIndex+7)-.5)*3,color:[110,231,240],startedAt:now,expiresAt:now+1450+spiderNoise(legIndex+3)*800,phase:spiderNoise(legIndex+now*.001),point:p});
-    usedLegs.add(legIndex);usedRows.add(row.key)
-   }
-  }
-  const candidates=rows.map(row=>({row,d:Math.hypot((row.x0+row.x1)/2-hub.x,row.y-hub.y)})).filter(x=>x.d>32&&x.d<116).sort((a,b)=>a.d-b.d);
+  const scale=Math.max(.72,Math.min(1.18,innerHeight/760)),rows=spiderDockRows(),usedLegs=new Set(spider.docks.filter(d=>d.releasingAt==null).map(d=>d.legIndex)),usedRows=new Set(spider.docks.map(d=>d.key));
+  const pointFor=row=>{const x=row.point?.x??Math.max(row.x0+3,Math.min(row.x1-3,hub.x)),y=row.point?.y??row.y;return{x,y}};
+  const candidates=rows.map(row=>{const p=pointFor(row);return{row,p,d:Math.hypot(p.x-hub.x,p.y-hub.y)}}).filter(c=>c.d>=24).sort((a,b)=>a.d-b.d);
   const want=Math.min(7,Math.max(Math.min(4,candidates.length),Math.ceil(candidates.length*.72)));
-  for(const {row} of candidates){
-   if(spider.docks.length>=want)break;
-   if(usedRows.has(row.key))continue;
-   let legIndex=-1,best=Math.PI;
-   const ang=Math.atan2(row.y-hub.y,(row.x0+row.x1)/2-hub.x);
-   for(let i=0;i<SPIDER_LEGS;i++){if(usedLegs.has(i))continue;const n=spider.wbNodes?.[i*SPIDER_SEGMENTS+1],base=n?.a??(-Math.PI/2+i*Math.PI*2/SPIDER_LEGS+SPIDER_AO[i]*Math.PI/180),diff=Math.abs(Math.atan2(Math.sin(base-ang),Math.cos(base-ang)));if(diff<best){best=diff;legIndex=i}}
-   if(legIndex<0)break;
-   const value=spiderDockValue(row),num=parseFloat(value.replace(/[,，]/g,'')),weight=Number.isFinite(num)?Math.max(.1,Math.min(1,Math.log10(Math.abs(num)+1)/5)):.58;
-   const color=/最低|low|min|回撤|风险|risk/i.test(row.text)?[110,231,240]:/最高|high|max|收益|成交|score/i.test(row.text)?[255,92,110]:(spider.docks.length%2?[255,92,110]:[110,231,240]);
-   const fullWidth=Math.max(9,Math.min(78,(row.x1-row.x0)*.46*(.34+.66*weight))),tag=spiderDockTag(row);
-   spider.docks.push({legIndex,row,el:row.el||null,key:row.key,text:row.text,kind:row.kind,x0:row.x0,x1:row.x1,y:row.y,fullWidth,value,tag,tagAngle:(spiderNoise(legIndex+row.text.length)-.5)*.45,tagDy:(spiderNoise(legIndex+3)-.5)*3,color,startedAt:now,expiresAt:now+1150+spiderNoise(legIndex+row.text.length)*800,phase:spiderNoise(legIndex+now*.001)});
+  for(const item of candidates){
+   if(spider.docks.filter(d=>d.releasingAt==null).length>=want)break;
+   const {row,p,d:distance}=item;if(usedRows.has(row.key))continue;
+   let legIndex=-1,best=Infinity;
+   for(let i=0;i<SPIDER_LEGS;i++){
+    if(usedLegs.has(i))continue;
+    const reach=SPIDER_BASE_R*SPIDER_RF[i]*scale*1.08;if(distance>reach)continue;
+    const n=spider.wbNodes?.[i*SPIDER_SEGMENTS+1],base=n?.a??(-Math.PI/2+i*Math.PI*2/SPIDER_LEGS+SPIDER_AO[i]*Math.PI/180),angle=Math.atan2(p.y-hub.y,p.x-hub.x),diff=Math.abs(Math.atan2(Math.sin(base-angle),Math.cos(base-angle)));
+    const cost=diff+distance/reach*.08;if(cost<best){best=cost;legIndex=i}
+   }
+   if(legIndex<0)continue;
+   const tag=spiderDockTag(row),value=spiderDockValue(row),num=parseFloat(value.replace(/[,，]/g,'')),weight=Number.isFinite(num)?Math.max(.1,Math.min(1,Math.log10(Math.abs(num)+1)/5)):.58;
+   const width=Math.max(10,Math.min(26,7+13*weight)),color=/LOW|RISK|LIQ/.test(tag)?[110,231,240]:/HIGH|SCORE|CHANGE/.test(tag)?[255,92,110]:(spider.docks.length%2?[255,92,110]:[110,231,240]);
+   spider.docks.push({legIndex,row,el:row.el||null,key:row.key,text:row.text,kind:row.kind,targetX:p.x,targetY:p.y,x0:p.x-width,x1:p.x,y:p.y,fullWidth:width,value,tag,tagAngle:(spiderNoise(legIndex+row.text.length)-.5)*.34,tagDy:(spiderNoise(legIndex+3)-.5)*2,color,startedAt:now,expiresAt:now+1550+spiderNoise(legIndex+row.text.length)*650,phase:spiderNoise(legIndex+now*.001),attached:false});
    usedLegs.add(legIndex);usedRows.add(row.key)
   }
  }
- for(const d of spider.docks){if(d.el?.isConnected){const r=d.el.getBoundingClientRect();if(r.width&&r.height&&r.bottom>0&&r.top<innerHeight){d.x0=Math.max(0,r.left+2);d.x1=Math.min(innerWidth,r.right-2);d.y=Math.max(0,Math.min(innerHeight,r.top+r.height/2));const liveText=(d.el.innerText||d.el.textContent||'').replace(/\s+/g,' ').trim();if(liveText){d.text=liveText;d.tag=spiderDockTag({...d.row,text:liveText});d.value=spiderDockValue({...d.row,tag:d.tag,text:liveText})}}else if(d.releasingAt==null)d.releasingAt=now}}
+ for(const d of spider.docks){
+  if(d.el?.isConnected){
+   const r=d.el.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+   for(let p=d.el.parentElement;p&&p!==document.body;p=p.parentElement){const cs=getComputedStyle(p),clipX=/(auto|scroll|hidden|clip)/.test(cs.overflowX),clipY=/(auto|scroll|hidden|clip)/.test(cs.overflowY);if(!clipX&&!clipY)continue;const pr=p.getBoundingClientRect();if(clipX){left=Math.max(left,pr.left);right=Math.min(right,pr.right)}if(clipY){top=Math.max(top,pr.top);bottom=Math.min(bottom,pr.bottom)}}
+   if(right-left>=12&&bottom-top>=5){
+    d.y=Math.max(0,Math.min(innerHeight,(top+bottom)/2));d.targetY=d.y;d.targetX=Math.max(left+3,Math.min(right-3,hub.x));d.x1=d.targetX;d.x0=d.targetX-d.fullWidth;
+    const liveText=(d.el.innerText||d.el.textContent||'').replace(/\s+/g,' ').trim();
+    if(liveText){d.text=liveText;d.row={...d.row,text:liveText};d.tag=spiderDockTag(d.row);d.value=spiderDockValue(d.row)}
+   }else if(d.releasingAt==null)d.releasingAt=now
+  }
+ }
 }
 function drawSpiderDataInteractions(ctx,hub,now){
  const docks=spider.docks||[];
@@ -413,7 +418,7 @@ function drawArticulatedSpider(ctx,p,heading,dt,now,palette){
  const phase=(elapsed%780)/780,burst=flying&&phase<.34?Math.sin(Math.PI*phase/.34):0,net=Math.max(burst,preU);
  const step=1-Math.pow(1-.20,dt*60),damp=Math.pow(.78,dt*60),margin=5;
  updateSpiderDocks(hub,now,flying);
- const dockByLeg=new Map((spider.docks||[]).map(d=>[d.legIndex,d]));
+ const dockByLeg=new Map((spider.docks||[]).filter(d=>d.releasingAt==null&&!flying&&!spider.moving).map(d=>[d.legIndex,d]));
  for(let i=0;i<SPIDER_LEGS;i++){
   const down=Math.sin(node(i,0).base),a0=node(i,0).base+.10*Math.sin(t*.17);
   const spread=SPIDER_BASE_R*SPIDER_RF[i]*(1+.05*Math.sin(t*1.1+i)),hang=SPIDER_BASE_R*SPIDER_RF[i]*(down>0?1+.85*down:.52);
@@ -428,10 +433,16 @@ function drawArticulatedSpider(ctx,p,heading,dt,now,palette){
    let targetR=spreadR*(1-fly)+flightR*fly,targetA=spiderAngleLerp(angles[l],flightA,fly);
    if(kick){targetR*=1+.45*kick*(l===2?1:l===1?.75:.45);targetA=a0+(targetA-a0)*(1+.28*kick)}
    let tx=hub.x+Math.cos(targetA)*targetR,ty=hub.y+Math.sin(targetA)*targetR;
-   if(dockPos&&!flying){const reach=[.18,.44,1][l];tx+=(dockPos.x-tx)*reach;ty+=(dockPos.y-ty)*reach}
+   
    const capture=spider.pendingKlineCapture;if(!flying&&!spider.moving&&capture&&capture.key!==spider.lastWbCaptureKey&&capture.legIndex===i&&l===2){tx=capture.target.x;ty=capture.target.y;spider.lastWbCaptureKey=capture.key;spider.capturePoint={...capture,t:now};spider.pendingKlineCapture=null}
    tx=Math.max(margin,Math.min(innerWidth-margin,tx));ty=Math.max(margin,Math.min(innerHeight-margin,ty));
    n.vx=n.vx*damp+(tx-n.x)*step;n.vy=n.vy*damp+(ty-n.y)*step;n.x+=n.vx;n.y+=n.vy;n.x=Math.max(margin,Math.min(innerWidth-margin,n.x));n.y=Math.max(margin,Math.min(innerHeight-margin,n.y));n.a=Math.atan2(n.y-hub.y,n.x-hub.x);n.r=Math.hypot(n.x-hub.x,n.y-hub.y)
+  }
+  const anchored=dockByLeg.get(i);
+  if(anchored&&!flying&&!spider.moving){
+   const dx=anchored.targetX-hub.x,dy=anchored.targetY-hub.y,dist=Math.max(1,Math.hypot(dx,dy)),px=-dy/dist,py=dx/dist,bend=Math.min(7,dist*.09)*(i%2?1:-1),along=[.30,.66,1],offset=[bend,-bend*.62,0];
+   for(let l=0;l<SPIDER_SEGMENTS;l++){const n=node(i,l),q=along[l],x=hub.x+dx*q+px*offset[l],y=hub.y+dy*q+py*offset[l];n.x=x;n.y=y;n.vx=0;n.vy=0;n.a=Math.atan2(y-hub.y,x-hub.x);n.r=Math.hypot(x-hub.x,y-hub.y)}
+   const tip=node(i,SPIDER_SEGMENTS-1);anchored.attached=Math.hypot(tip.x-anchored.targetX,tip.y-anchored.targetY)<1.5
   }
  }
  if(spider.flightWasActive&&!flying){spider.flightWasActive=false;spider.flight=false;spider.calloutTitle='已落地 · 继续巡检';spider.calloutDetail=`${spider.liveLabel||spider.stage||'真实事件'} · 已抵达目标位置`}
