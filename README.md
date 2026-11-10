@@ -100,3 +100,7 @@ API：`GET /api/health`，`POST /api/audit`，`POST /api/factor-replay`，`POST 
 
 项目不重复造通用回测引擎。`framebt` 采用 MIT 许可证并以固定 Git commit 作为依赖；LangGraph 采用其开源 StateGraph 编排模式；Microsoft RD-Agent(Q) 通过因子分数 handoff 接入研究闭环。RD-Agent 的研究循环仍在独立的 Qlib 环境中运行，本应用目前只支持单标的分数阈值回放，不应宣传为已把其多因子组合或自动进化运行时内嵌进来。
 
+## 联系方式
+
+- 微信号：Feizai0709
+- 邮箱：229703643@qq.com
